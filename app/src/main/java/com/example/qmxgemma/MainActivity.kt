@@ -83,10 +83,19 @@ class MainActivity : AppCompatActivity() {
                 it is InferenceEngine.State.Initialized || it is InferenceEngine.State.Error
             }
             if (engine.state.value is InferenceEngine.State.Initialized) {
-                val existingModel = File(filesDir, "models")
-                    .listFiles()
-                    ?.filter { it.isFile && it.extension.equals("gguf", ignoreCase = true) }
-                    ?.maxByOrNull(File::lastModified)
+                val modelsDir = File(filesDir, "models")
+                val requestedModelName = intent.getStringExtra(EXTRA_MODEL_NAME)
+                    ?.takeIf { it == File(it).name }
+                val existingModel = if (requestedModelName != null) {
+                    File(modelsDir, requestedModelName).takeIf {
+                        it.isFile && it.extension.equals("gguf", ignoreCase = true)
+                    }
+                } else {
+                    modelsDir.listFiles()
+                        ?.filter { it.isFile && it.extension.equals("gguf", ignoreCase = true) }
+                        ?.maxByOrNull(File::lastModified)
+                }
+                Log.i(TAG, "QMX_MODEL_SELECTION requested=$requestedModelName selected=${existingModel?.name}")
                 if (existingModel != null) {
                     try {
                         loadModelFile(existingModel)
@@ -354,6 +363,7 @@ class MainActivity : AppCompatActivity() {
         private const val QMX_ENVIRONMENT_VARIABLE = "GGML_KLEIDIAI_SME"
         private const val EXTRA_QMX_MODE = "qmx_mode"
         private const val EXTRA_RUN_BENCHMARK = "run_benchmark"
+        private const val EXTRA_MODEL_NAME = "model_name"
         private const val EXTRA_BENCH_THREADS = "bench_threads"
         private const val EXTRA_BENCH_RUNS = "bench_runs"
         private const val BENCH_PROMPT_TOKENS = 128

@@ -175,6 +175,7 @@ Run six one-thread QMX trials:
 adb shell am force-stop com.example.qmxgemma
 adb logcat -c
 adb shell am start -n com.example.qmxgemma/.MainActivity `
+  --es model_name gemma-4-E2B-it-Q8_0.gguf `
   --es qmx_mode 1 `
   --ez run_benchmark true `
   --ei bench_threads 1 `
@@ -188,6 +189,7 @@ Run the matched non-SME control by changing only `qmx_mode`:
 adb shell am force-stop com.example.qmxgemma
 adb logcat -c
 adb shell am start -n com.example.qmxgemma/.MainActivity `
+  --es model_name gemma-4-E2B-it-Q8_0.gguf `
   --es qmx_mode 0 `
   --ez run_benchmark true `
   --ei bench_threads 1 `
@@ -198,6 +200,14 @@ For four threads, repeat both commands with `--ei bench_threads 4`. Discard the
 first result as a warm-up when comparing modes. The result table is displayed in
 the app and emitted as `QMX_BENCH_RESULT` in logcat.
 
+`model_name` selects an already imported model by its exact private-storage file
+name. This avoids accidentally benchmarking whichever GGUF was imported most
+recently. For the Gemma 3 model linked as "Gemma 4B" by Qualcomm, use:
+
+```text
+--es model_name gemma-3-4b-it-Q8_0.gguf
+```
+
 Restore normal device power behavior when finished:
 
 ```powershell
@@ -207,15 +217,37 @@ adb shell svc power stayon false
 
 On the verified partial-QMX build, warmed one-thread averages were:
 
-| Test | QMX/SME | Non-SME I8MM | Speedup |
+| Gemma 4 E2B Q8_0 test | QMX/SME | Non-SME I8MM | Speedup |
 |---|---:|---:|---:|
 | 128-token prefill | 8.316 tok/s | 8.264 tok/s | 1.006x |
 | Decode | 8.342 tok/s | 8.120 tok/s | 1.027x |
 
+The blog-linked Unsloth Gemma 3 4B Q8_0 was also tested on the same phone. The
+file was 4,130,402,176 bytes with SHA-256
+`81bf0583ab5bad155a5a3b15d155a880a1a1e4f7de2de5c06f10f64ac49f8336`.
+Six runs were made per mode; the first was excluded as warm-up. Post-warm-up
+means were:
+
+| Gemma 3 4B Q8_0 test | Threads | QMX/SME | Non-SME I8MM | Speedup |
+|---|---:|---:|---:|---:|
+| 128-token prefill | 1 | 6.507 tok/s | 6.430 tok/s | 1.012x |
+| Decode | 1 | 6.325 tok/s | 5.887 tok/s | 1.074x |
+| 128-token prefill | 4 | 22.865 tok/s | 22.892 tok/s | 0.999x |
+| Decode | 4 | 12.099 tok/s | 12.828 tok/s | 0.943x |
+
+For Gemma 3, QMX selected the SME Q8 kernel and allocated a 1,084.08 MiB
+`CPU_KLEIDIAI` model buffer; the control selected I8MM, disabled SME, and
+allocated 573.75 MiB. Both modes accelerated only 6 of 34 transformer blocks.
+The four-thread runs showed an end-of-loop thermal/scheduler slowdown in both
+modes; the median speedups (0.998x prefill and 0.935x decode) lead to the same
+conclusion as the means.
+
 Qualcomm's article reports maxima across several Q8 models of 2.9x TTFT and
 1.5x decode for one thread, and 2.0x/1.05x for four threads. Those measurements
-used fixed CPU frequencies, a NEON-only baseline, and configurations that are
-not identical to this partial Gemma 4 E2B allocation:
+used explicitly fixed CPU frequencies and a NEON-only baseline. This app reports
+prompt-processing throughput rather than exact end-to-end UI TTFT, uses an I8MM
+control, and repacks only six layers, so its values are not a reproduction of
+Qualcomm's full benchmark configuration:
 <https://www.qualcomm.com/developer/blog/2026/04/llama-models-acceleration-on-cpu-qmx>
 
 ## Implementation notes
