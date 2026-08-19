@@ -278,6 +278,42 @@ above. A fair article-style comparison must pair that corrected QMX runtime with
 a separately compiled generic-NEON runner; toggling only
 `GGML_KLEIDIAI_SME` does not create Qualcomm's stated NEON baseline.
 
+### Closest reproducible QMX-versus-NEON result
+
+A second APK with the same package, model, llama.cpp revision, tensor placement,
+and benchmark harness was built solely as a control. Its native CPU library was
+compiled with `-march=armv8-a`, `GGML_CPU_KLEIDIAI=OFF`, and
+`GGML_CPU_ALL_VARIANTS=OFF`. The APK contained one generic `libggml-cpu.so`; its
+runtime emitted no KleidiAI kernel selection and allocated no `CPU_KLEIDIAI`
+buffer. The QMX APK reported the SME Q8 kernel, SME enabled, and a 3,613.60 MiB
+KleidiAI buffer for 20 of Gemma 3's 34 blocks.
+
+Both APKs ran six 128-token prefill plus 128-token decode trials in the foreground
+with Android fixed-performance mode enabled. The context was 256 tokens, batch
+and micro-batch were 128, Flash Attention resolved on, and the first trial was
+discarded as warm-up. The warmed means were:
+
+| Gemma 3 4B Q8_0 test | Threads | QMX/SME, 20/34 | Generic NEON | Speedup |
+|---|---:|---:|---:|---:|
+| 128-token prefill | 1 | 11.795 tok/s | 5.849 tok/s | 2.017x |
+| Decode | 1 | 7.400 tok/s | 4.712 tok/s | 1.571x |
+| 128-token prefill | 4 | 38.436 tok/s | 16.314 tok/s | 2.356x |
+| Decode | 4 | 12.805 tok/s | 10.997 tok/s | 1.164x |
+
+One warmed one-thread QMX decode trial suffered an isolated paging/USB stall
+(4.848 tok/s versus 8.030–8.046 tok/s for the other warmed trials). Keeping that
+outlier gives the conservative 1.571x table result; excluding it gives 8.038
+tok/s and 1.706x. The four-thread series rose from roughly 34 C to 39 C and both
+paths showed late thermal decline, especially generic-NEON prefill. These are
+therefore real device measurements, but not a claim of laboratory-equivalent
+frequency control.
+
+For this model and device state, 20/34 was the highest repeatably benchmarkable
+QMX placement. 21 blocks (3,794.28 MiB) loaded and completed a two-run test once,
+but Android's low-memory manager killed a later fresh load. 22 blocks (3,974.96
+MiB) was consistently killed before context initialization. Values from 6
+through 20 in two-block increments all completed model loading.
+
 ## Implementation notes
 
 - `lib/src/main/cpp/CMakeLists.txt` builds all Arm64 CPU variants and enables
