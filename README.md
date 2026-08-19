@@ -177,6 +177,7 @@ adb logcat -c
 adb shell am start -n com.example.qmxgemma/.MainActivity `
   --es model_name gemma-4-E2B-it-Q8_0.gguf `
   --es qmx_mode 1 `
+  --ei qmx_layers 6 `
   --ez run_benchmark true `
   --ei bench_threads 1 `
   --ei bench_runs 6
@@ -191,6 +192,7 @@ adb logcat -c
 adb shell am start -n com.example.qmxgemma/.MainActivity `
   --es model_name gemma-4-E2B-it-Q8_0.gguf `
   --es qmx_mode 0 `
+  --ei qmx_layers 6 `
   --ez run_benchmark true `
   --ei bench_threads 1 `
   --ei bench_runs 6
@@ -199,6 +201,13 @@ adb shell am start -n com.example.qmxgemma/.MainActivity `
 For four threads, repeat both commands with `--ei bench_threads 4`. Discard the
 first result as a warm-up when comparing modes. The result table is displayed in
 the app and emitted as `QMX_BENCH_RESULT` in logcat.
+
+`qmx_layers` controls how many leading transformer blocks are copied into the
+KleidiAI repacking buffer. It defaults to 6 and is clamped to 1–64; values above
+the model's block count simply select every block. Always force-stop the app
+before changing it because the native engine is process-scoped. Increase the
+value gradually (for example 8, 10, 12) and confirm that model loading completes
+before benchmarking. A larger value substantially increases peak native memory.
 
 `model_name` selects an already imported model by its exact private-storage file
 name. This avoids accidentally benchmarking whichever GGUF was imported most
@@ -250,13 +259,33 @@ control, and repacks only six layers, so its values are not a reproduction of
 Qualcomm's full benchmark configuration:
 <https://www.qualcomm.com/developer/blog/2026/04/llama-models-acceleration-on-cpu-qmx>
 
+### Exact blog-snapshot compatibility result
+
+The article's pinned llama.cpp commit
+`25f40ca65f1aa596f8b1702bbac4bc48a45b87d7` was also built with NDK r28b,
+Android API 29, KleidiAI enabled, and its documented Armv9.2/SME flags. On this
+SM-S948B, the exact non-SME command loaded and repacked all 34 Gemma 3 blocks
+(a 3,931 MiB `CPU_KLEIDIAI` buffer). It is not a plain-NEON baseline: in that
+source snapshot, `GGML_KLEIDIAI_SME=0` still selects KleidiAI I8MM.
+
+The exact snapshot's QMX command repacked the full model and then terminated
+with `SIGILL` inside `libggml-cpu.so`. The phone reports base SME but not SME2,
+while that snapshot selects SME2-named Q8 kernels from its base-SME feature
+check. Therefore an exact binary-for-binary reproduction is not safe on this
+device. The newer llama.cpp/KleidiAI revision pinned by this app uses its
+base-SME-compatible path successfully, as demonstrated by the runtime evidence
+above. A fair article-style comparison must pair that corrected QMX runtime with
+a separately compiled generic-NEON runner; toggling only
+`GGML_KLEIDIAI_SME` does not create Qualcomm's stated NEON baseline.
+
 ## Implementation notes
 
 - `lib/src/main/cpp/CMakeLists.txt` builds all Arm64 CPU variants and enables
   `GGML_CPU_KLEIDIAI` for `arm64-v8a`.
 - `MainActivity` sets `GGML_KLEIDIAI_SME` before `AiChat` loads native code.
-- `ai_chat.cpp` assigns the first six transformer blocks to the regular CPU
-  buffer type, allowing CPU_KLEIDIAI repacking; other tensors remain mapped.
+- `ai_chat.cpp` assigns the requested leading transformer blocks to the regular
+  CPU buffer type, allowing CPU_KLEIDIAI repacking; other tensors remain mapped.
+  The `qmx_layers` intent extra sets `QMX_ACCELERATED_LAYERS` before model load.
 - Runtime status is driven by captured llama.cpp logs rather than build-time
   configuration alone.
 - The model context is 2048 tokens with a 128-token batch.
@@ -272,10 +301,9 @@ is not proof that a compatible SME kernel was selected.
 
 ### App dies while loading
 
-A full Q8 repack requires several additional gigabytes. Keep
-`QMX_ACCELERATED_LAYERS` at six unless you have measured additional process
-memory headroom. Android may kill the process without a Java exception when the
-native allocation is too large.
+A full Q8 repack requires several additional gigabytes. Keep `qmx_layers` at six
+unless you have measured additional process memory headroom. Android may kill
+the process without a Java exception when the native allocation is too large.
 
 ### CMake or NDK mismatch
 
