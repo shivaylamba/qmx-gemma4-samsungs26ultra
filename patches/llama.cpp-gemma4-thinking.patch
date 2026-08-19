@@ -1,0 +1,31 @@
+diff --git a/common/chat.cpp b/common/chat.cpp
+index 39761f1..f4493f2 100644
+--- a/common/chat.cpp
++++ b/common/chat.cpp
+@@ -654,9 +654,11 @@ std::string common_chat_format_single(const struct common_chat_templates * tmpls
+                                       const std::vector<common_chat_msg> & past_msg,
+                                       const common_chat_msg &              new_msg,
+                                       bool                                 add_ass,
+-                                      bool                                 use_jinja) {
++                                      bool                                 use_jinja,
++                                      bool                                 enable_thinking) {
+     common_chat_templates_inputs inputs;
+     inputs.use_jinja = use_jinja;
++    inputs.enable_thinking = enable_thinking;
+     inputs.add_bos   = tmpls->add_bos;
+     inputs.add_eos   = tmpls->add_eos;
+ 
+diff --git a/common/chat.h b/common/chat.h
+index 6d5b220..6f81fe4 100644
+--- a/common/chat.h
++++ b/common/chat.h
+@@ -330,7 +330,8 @@ std::string common_chat_format_single(const struct common_chat_templates * tmpls
+                                       const std::vector<common_chat_msg> & past_msg,
+                                       const common_chat_msg &              new_msg,
+                                       bool                                 add_ass,
+-                                      bool                                 use_jinja);
++                                      bool                                 use_jinja,
++                                      bool                                 enable_thinking = true);
+ 
+ // Returns an example of formatted chat
+ std::string common_chat_format_example(const struct common_chat_templates *       tmpls,

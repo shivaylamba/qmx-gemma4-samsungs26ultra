@@ -1,0 +1,20 @@
+.gradle/
+.idea/
+**/build/
+local.properties
+*.iml
+models/
+*.gguf
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Local device-test output
+bench-ui.xml
+qmx-*.xml
+captures/
+qmx-gemma-screen.png
+
+# Historical checkouts; the build uses only llama.cpp-current as a submodule.
+third_party/llama.cpp/
+third_party/kleidiai/

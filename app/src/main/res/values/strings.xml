@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">QMX Gemma</string>
+    <string name="headline">Gemma 4 E2B</string>
+    <string name="subhead">Private, on-device text generation</string>
+    <string name="qmx_requested">QMX · SME requested</string>
+    <string name="choose_model">Choose model</string>
+    <string name="send">Send</string>
+    <string name="stop">Stop</string>
+    <string name="clear">Clear</string>
+    <string name="prompt_hint">Ask Gemma something…</string>
+</resources>

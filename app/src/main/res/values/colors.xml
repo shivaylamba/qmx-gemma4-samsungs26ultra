@@ -1,0 +1,9 @@
+<resources>
+    <color name="ink">#171A21</color>
+    <color name="muted">#657083</color>
+    <color name="surface">#F7F8FC</color>
+    <color name="accent">#3157D5</color>
+    <color name="accent_soft">#E8EDFF</color>
+    <color name="positive">#167D57</color>
+    <color name="white">#FFFFFF</color>
+</resources>

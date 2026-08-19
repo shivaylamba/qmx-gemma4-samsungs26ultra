@@ -1,0 +1,10 @@
+<resources>
+    <style name="Theme.QmxGemma" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/accent</item>
+        <item name="colorSecondary">@color/positive</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:navigationBarColor">@color/surface</item>
+        <item name="android:statusBarColor">@color/surface</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>
