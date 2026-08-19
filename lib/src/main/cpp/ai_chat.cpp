@@ -35,7 +35,8 @@ constexpr int   N_THREADS_HEADROOM      = 2;
 constexpr int   DEFAULT_CONTEXT_SIZE    = 2048;
 constexpr int   OVERFLOW_HEADROOM       = 4;
 constexpr int   BATCH_SIZE              = 128;
-constexpr int   QMX_ACCELERATED_LAYERS  = 6;
+constexpr int   DEFAULT_QMX_ACCELERATED_LAYERS = 6;
+constexpr int   MAX_QMX_ACCELERATED_LAYERS     = 64;
 constexpr float DEFAULT_SAMPLER_TEMP    = 0.3f;
 
 static llama_model                      * g_model;
@@ -46,6 +47,21 @@ static common_sampler                   * g_sampler;
 static std::atomic<bool>                  g_sme_enabled(false);
 static std::atomic<bool>                  g_q8_sme_kernel(false);
 static std::atomic<int>                   g_kleidiai_buffer_centimib(0);
+static std::atomic<int>                   g_qmx_accelerated_layers(DEFAULT_QMX_ACCELERATED_LAYERS);
+
+static int requested_qmx_layers() {
+    const char *value = std::getenv("QMX_ACCELERATED_LAYERS");
+    if (value == nullptr || *value == '\0') {
+        return DEFAULT_QMX_ACCELERATED_LAYERS;
+    }
+    char *end = nullptr;
+    const long parsed = std::strtol(value, &end, 10);
+    if (end == value || *end != '\0') {
+        LOGw("Ignoring invalid QMX_ACCELERATED_LAYERS=%s", value);
+        return DEFAULT_QMX_ACCELERATED_LAYERS;
+    }
+    return (int) std::max(1L, std::min((long) MAX_QMX_ACCELERATED_LAYERS, parsed));
+}
 
 static void qmx_tracking_log_callback(
         enum ggml_log_level level, const char *text, void *user_data) {
@@ -95,9 +111,10 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_load(JNIEnv *env, jobject, jstr
     ggml_backend_buffer_t mapped_buffer = ggml_backend_cpu_buffer_from_ptr(
             mapped_buffer_probe, sizeof(mapped_buffer_probe));
     ggml_backend_buffer_type_t mapped_buffer_type = ggml_backend_buffer_get_type(mapped_buffer);
+    const int qmx_layers = requested_qmx_layers();
     std::ostringstream qmx_blocks;
     qmx_blocks << "^blk\\.(";
-    for (int layer = 0; layer < QMX_ACCELERATED_LAYERS; ++layer) {
+    for (int layer = 0; layer < qmx_layers; ++layer) {
         if (layer > 0) { qmx_blocks << "|"; }
         qmx_blocks << layer;
     }
@@ -110,7 +127,7 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_load(JNIEnv *env, jobject, jstr
     };
     model_params.tensor_buft_overrides = tensor_overrides;
     LOGi("Loading %d transformer blocks with QMX; remaining tensors stay memory-mapped",
-         QMX_ACCELERATED_LAYERS);
+         qmx_layers);
 
     const auto *model_path = env->GetStringUTFChars(jmodel_path, 0);
     LOGd("%s: Loading model from: \n%s\n", __func__, model_path);
@@ -122,6 +139,7 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_load(JNIEnv *env, jobject, jstr
         return 1;
     }
     g_model = model;
+    g_qmx_accelerated_layers.store(std::min(qmx_layers, (int) llama_model_n_layer(model)));
     return 0;
 }
 
@@ -205,7 +223,7 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_nativeAccelerationInfo(
     if (qmx_active) {
         result << "QMX active · CPU_KLEIDIAI/SME · "
                << std::fixed << std::setprecision(2) << buffer_centimib / 100.0
-               << " MiB · " << QMX_ACCELERATED_LAYERS << "/"
+               << " MiB · " << g_qmx_accelerated_layers.load() << "/"
                << llama_model_n_layer(g_model) << " layers";
     } else {
         result << "CPU fallback · no QMX model buffer observed";
