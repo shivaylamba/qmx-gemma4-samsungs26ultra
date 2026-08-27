@@ -1,0 +1,4 @@
+﻿0.00.617.059 W load: control-looking token:     50 '<|tool_response>' was not control-type; this is probably a bug in the model. its type will be overridden
+0.00.622.822 W load: control-looking token:    212 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden
+0.00.640.209 W load: special_eog_ids contains '<|tool_response>', removing '</s>' token from EOG list
+{"n_kv_max": 2048, "n_batch": 2048, "n_ubatch": 512, "flash_attn": 1, "is_pp_shared": 0, "n_gpu_layers": -1, "n_threads": 4, "n_threads_batch": 4, "pp": 128, "tg": 128, "pl": 1, "n_kv": 256, "t_pp": 1.945490, "speed_pp": 65.793190, "t_tg": 9.280970, "speed_tg": 13.791662, "t": 11.226460, "speed": 22.803270}

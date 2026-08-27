@@ -1,0 +1,11 @@
+﻿{
+    "model":  "gemma-3-4b-it-Q8_0",
+    "mode":  "qmx",
+    "threads":  1,
+    "trial":  1,
+    "temp_start_c":  38.9,
+    "temp_end_c":  42.9,
+    "started":  "2026-08-27T21:00:59.3516625+05:30",
+    "ended":  "2026-08-27T21:03:55.8993419+05:30",
+    "output":  "0.00.322.448 W load: control-looking token:    212 \u0027\u003c/s\u003e\u0027 was not control-type; this is probably a bug in the model. its type will be overridden\nKilled "
+}

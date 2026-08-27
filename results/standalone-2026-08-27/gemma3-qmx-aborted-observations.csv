@@ -1,0 +1,4 @@
+elapsed,rss_kib,vsz_kib,mem_available_kib,swap_free_kib,swap_used_kib,battery_temp_c,note
+00:15,5563892,22696304,4555652,8287780,4295128,38.6,"model load or early benchmark"
+01:30,343716,23491944,886112,3735328,8847580,42.0,"severe paging, no benchmark result"
+02:56,,,880356,4001448,8581460,42.9,"TERM did not stop compute; process then killed with SIGKILL"

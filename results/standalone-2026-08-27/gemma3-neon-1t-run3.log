@@ -1,0 +1,2 @@
+﻿0.00.313.272 W load: control-looking token:    212 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden
+{"n_kv_max": 2048, "n_batch": 2048, "n_ubatch": 512, "flash_attn": 1, "is_pp_shared": 0, "n_gpu_layers": -1, "n_threads": 1, "n_threads_batch": 1, "pp": 128, "tg": 128, "pl": 1, "n_kv": 256, "t_pp": 21.877552, "speed_pp": 5.850746, "t_tg": 27.645561, "speed_tg": 4.630038, "t": 49.523113, "speed": 5.169303}

@@ -1,0 +1,20 @@
+﻿Collected: 2026-08-27 Asia/Calcutta
+product.model=SM-S948B
+soc.model=SM8850
+board.platform=canoe
+android.release=16
+MemTotal:       11389624 kB
+cpu0.max_khz=3628800
+cpu1.max_khz=3628800
+cpu2.max_khz=3628800
+cpu3.max_khz=3628800
+cpu4.max_khz=3628800
+cpu5.max_khz=3628800
+cpu6.max_khz=4742400
+cpu7.max_khz=4742400
+qmx.version=version: 0.1.2-dev (build 1, commit 2e92ecd) | built with Clang 19.0.0 for Android aarch64
+neon.version=version: 0.1.2-dev (build 1, commit 2e92ecd) | built with Clang 19.0.0 for Android aarch64
+gemma-3-4b-it-Q8_0.gguf.bytes=4130402176
+gemma-3-4b-it-Q8_0.gguf.sha256=81bf0583ab5bad155a5a3b15d155a880a1a1e4f7de2de5c06f10f64ac49f8336
+gemma-4-E2B-it-Q8_0.gguf.bytes=4967497152
+gemma-4-E2B-it-Q8_0.gguf.sha256=996d08777aadc6bfd3c7375ef70ba25a0f55240075860754fdb18d6d860aa63a

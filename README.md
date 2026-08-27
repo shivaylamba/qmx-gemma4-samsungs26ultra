@@ -332,6 +332,36 @@ became the practical memory limit. The table above remains labeled 20/34 because
 that was the matched QMX-versus-generic-NEON run captured with stable
 measurements on both APKs.
 
+### Standalone ADB reproduction
+
+The Qualcomm article-style test has also been repeated with standalone native
+`llama-batched-bench` binaries under `adb shell`, without launching this Android
+app. The repository now includes scripts to build, deploy, and run a QMX binary
+and a separately compiled generic-NEON control:
+
+```powershell
+.\scripts\build-standalone.ps1
+.\scripts\deploy-standalone.ps1
+.\scripts\run-standalone-benchmark.ps1 `
+  -RemoteModel /data/local/tmp/qmx-standalone/models/gemma-4-E2B-it-Q8_0.gguf `
+  -ModelLabel gemma4
+```
+
+The full raw data and analysis are in
+[`results/standalone-2026-08-27`](results/standalone-2026-08-27/README.md).
+The stable one-thread Gemma 4 E2B Q8_0 result was 23.946 tok/s QMX versus
+8.033 tok/s generic NEON for prefill (2.981x), and 14.808 versus 6.477 tok/s
+for decode (2.286x). Four-thread runs were scheduler/thermal sensitive and are
+reported with their per-trial temperatures rather than presented as a clean
+laboratory comparison.
+
+Full-QMX Gemma 3 4B Q8_0 was not a valid performance run on this 12 GB phone.
+The current compatible KleidiAI path allocated a 7,429.44 MiB repacked buffer
+in addition to the 3,932.82 MiB mapped model and native working buffers. A
+literal 128/128 run consumed about 8.85 GiB of Android swap and reached 42.9 C
+without producing a result, so it was stopped and is documented as an invalid
+memory-pressure outcome. The generic-NEON baseline completed normally.
+
 ## Implementation notes
 
 - `lib/src/main/cpp/CMakeLists.txt` builds all Arm64 CPU variants and enables

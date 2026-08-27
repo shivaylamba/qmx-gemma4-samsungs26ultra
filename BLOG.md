@@ -141,6 +141,14 @@ The device reports base SME but not SME2. In that older source combination, the 
 
 Trying the article’s very large `-b 2048 -ub 512` settings with a full model also triggered heavy paging on this app/device setup. Once the process is swapping gigabytes, the measurement describes storage pressure more than matrix compute. Bigger buffers are not automatically better on Android.
 
+## Update: the standalone ADB reproduction
+
+I later removed the Android app from the measurement path and built two standalone `llama-batched-bench` runners: a QMX/KleidiAI binary and a separate generic-NEON control. With the article’s chart configuration of 128 prompt tokens, 128 decode tokens, and one thread, Gemma 4 E2B Q8_0 reached 23.946 tok/s QMX versus 8.033 tok/s NEON for prefill, and 14.808 versus 6.477 tok/s for decode. Those ratios are 2.981x and 2.286x. The QMX log selected the SME Q8 kernel and allocated a 4,385.35 MiB `CPU_KLEIDIAI` buffer.
+
+Gemma 3 produced a different and equally useful result. Full repacking required a 7,429.44 MiB KleidiAI buffer in addition to the 3,932.82 MiB mapped model and native working buffers. On this 12 GB phone, a literal 128/128 run consumed about 8.85 GiB of Android swap and reached 42.9 C without returning a result, so I stopped it. That is not a valid QMX benchmark. It is evidence that model fit and process memory can determine whether a theoretically correct benchmark is meaningful at all.
+
+The four-thread standalone results were also bimodal because the production phone exposed six lower-capacity cores and two higher-capacity cores without Qualcomm’s private frequency and affinity controls. I therefore published every trial and temperature instead of turning an unstable mean into a headline. The [complete standalone report and raw data](results/standalone-2026-08-27/README.md) explain the exact-commit failures, model hashes, build flags, and comparison limits.
+
 ## Reproduce the app
 
 The repository pins the native dependency and includes an idempotent setup script:
