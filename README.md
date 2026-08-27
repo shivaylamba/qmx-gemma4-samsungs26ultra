@@ -10,8 +10,10 @@ The verified device is Samsung `SM-S948B` with Qualcomm `SM8850`. The app has:
 - a Clear action that resets both UI and native conversation state;
 - IME-aware layout so the composer stays above the keyboard;
 - runtime-backed `QMX ACTIVE`/`CPU FALLBACK` status;
+- an in-app, persistent Hugging Face download with progress, cancellation, and
+  SHA-256 verification;
 - an ADB-triggerable 128-token QMX-versus-non-SME benchmark;
-- automatic reload of the most recently imported GGUF.
+- automatic reload of the most recently imported or downloaded GGUF.
 
 ![Two-turn on-device chat](qmx-multiturn.png)
 
@@ -46,7 +48,7 @@ native benchmark setup exactly.
 ## Prerequisites
 
 - Windows 11 with Android Studio or a command-line Android SDK
-- JDK 17 or newer (JDK 21 is recommended)
+- JDK 21
 - Android SDK Platform 36
 - Android NDK r28b: `28.1.13356709`
 - CMake `3.31.6`
@@ -81,7 +83,7 @@ sdk.dir=C\:\\Users\\YOUR_NAME\\AppData\\Local\\Android\\Sdk
 
 ## Build
 
-Set `JAVA_HOME` to a JDK 17+ installation, then build and run lint:
+Set `JAVA_HOME` to a JDK 21 installation, then build and run lint:
 
 ```powershell
 $env:JAVA_HOME = "C:\path\to\jdk-21"
@@ -103,7 +105,8 @@ adb shell am start -n com.example.qmxgemma/.MainActivity
 
 ## Model
 
-Download the official llama.cpp conversion:
+The app can download the tested official llama.cpp conversion directly from
+Hugging Face:
 
 - Model: `gemma-4-E2B-it-Q8_0.gguf`
 - Expected size: `4,967,497,152` bytes
@@ -111,15 +114,27 @@ Download the official llama.cpp conversion:
 - Expected SHA-256:
   `996d08777aadc6bfd3c7375ef70ba25a0f55240075860754fdb18d6d860aa63a`
 
-Verify the download on Windows:
+Tap **Download model**, review the 4.97 GB confirmation, and tap **Download**.
+Android's persistent download service performs the transfer, so it continues
+if the Activity is recreated or the app process is restarted. The UI reports
+downloaded bytes and supports cancellation. Before llama.cpp sees the file, the
+app checks both its exact size and SHA-256. A failed verification deletes the
+file instead of attempting to load it.
+
+The downloaded model is stored in this app's external-files directory and is
+removed when the app is uninstalled. It is not executable code and is not
+included in the APK. The llama.cpp, ggml, KleidiAI, and JNI native libraries
+remain packaged inside the APK.
+
+For a manual download, verify the file on Windows:
 
 ```powershell
 Get-FileHash .\gemma-4-E2B-it-Q8_0.gguf -Algorithm SHA256
 ```
 
-Open the app, tap **Choose model**, and select the GGUF using Android's document
-picker. The app copies it to private app storage. The model is deliberately not
-bundled in the APK or this repository.
+Then tap **Choose model** and select the GGUF using Android's document picker.
+The app copies manually selected models to private app storage. This remains a
+fallback for offline installation or compatible custom GGUF files.
 
 Do not use the Q4_0 file for this device sample. The older Qualcomm-validated
 llama.cpp revision selected a nominal base-SME Q4 kernel containing SME2

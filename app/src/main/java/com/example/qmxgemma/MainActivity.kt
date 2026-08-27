@@ -1,5 +1,6 @@
 package com.example.qmxgemma
 
+import android.app.DownloadManager
 import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
@@ -14,6 +15,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -23,7 +25,9 @@ import com.arm.aichat.InferenceEngine
 import com.google.android.material.textfield.TextInputEditText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -41,15 +45,20 @@ class MainActivity : AppCompatActivity() {
     private lateinit var transcriptScroll: ScrollView
     private lateinit var promptInput: TextInputEditText
     private lateinit var modelButton: Button
+    private lateinit var downloadModelButton: Button
     private lateinit var sendButton: Button
 
     private lateinit var engine: InferenceEngine
+    private lateinit var modelDownload: HuggingFaceModelDownload
     private var generationJob: Job? = null
+    private var downloadMonitorJob: Job? = null
     private val modelLoadMutex = Mutex()
     @Volatile
     private var modelReady = false
     private var hasConversation = false
     private var benchmarkStarted = false
+    @Volatile
+    private var runtimeReady = false
 
     private val chooseModel = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(::importAndLoadModel)
@@ -66,9 +75,12 @@ class MainActivity : AppCompatActivity() {
         transcriptScroll = findViewById(R.id.transcriptScroll)
         promptInput = findViewById(R.id.promptInput)
         modelButton = findViewById(R.id.modelButton)
+        downloadModelButton = findViewById(R.id.downloadModelButton)
         sendButton = findViewById(R.id.sendButton)
+        modelDownload = HuggingFaceModelDownload(applicationContext)
         applySystemInsets(findViewById(R.id.root))
         modelButton.isEnabled = false
+        downloadModelButton.isEnabled = false
 
         // Qualcomm's documented runtime switch. ADB may override it for controlled A/B tests.
         // KleidiAI still checks the CPU capability,
@@ -86,10 +98,11 @@ class MainActivity : AppCompatActivity() {
                 it is InferenceEngine.State.Initialized || it is InferenceEngine.State.Error
             }
             if (engine.state.value is InferenceEngine.State.Initialized) {
+                runtimeReady = true
                 val modelsDir = File(filesDir, "models")
                 val requestedModelName = intent.getStringExtra(EXTRA_MODEL_NAME)
                     ?.takeIf { it == File(it).name }
-                val existingModel = if (requestedModelName != null) {
+                val importedModel = if (requestedModelName != null) {
                     File(modelsDir, requestedModelName).takeIf {
                         it.isFile && it.extension.equals("gguf", ignoreCase = true)
                     }
@@ -98,6 +111,15 @@ class MainActivity : AppCompatActivity() {
                         ?.filter { it.isFile && it.extension.equals("gguf", ignoreCase = true) }
                         ?.maxByOrNull(File::lastModified)
                 }
+                val downloadedModel = if (
+                    importedModel == null &&
+                    (requestedModelName == null || requestedModelName == HuggingFaceModelDownload.MODEL_FILENAME)
+                ) {
+                    verifiedDownloadedModel()
+                } else {
+                    null
+                }
+                val existingModel = importedModel ?: downloadedModel
                 Log.i(TAG, "QMX_MODEL_SELECTION requested=$requestedModelName selected=${existingModel?.name}")
                 if (existingModel != null) {
                     try {
@@ -112,7 +134,12 @@ class MainActivity : AppCompatActivity() {
                     withContext(Dispatchers.Main) {
                         statusText.text = "Runtime ready · choose a model"
                         modelButton.isEnabled = true
+                        downloadModelButton.isEnabled = true
                     }
+                }
+                withContext(Dispatchers.Main) {
+                    refreshDownloadButton()
+                    monitorModelDownload()
                 }
             } else {
                 withContext(Dispatchers.Main) {
@@ -124,6 +151,23 @@ class MainActivity : AppCompatActivity() {
         modelButton.setOnClickListener {
             if (generationJob?.isActive == true) return@setOnClickListener
             chooseModel.launch(arrayOf("application/octet-stream", "*/*"))
+        }
+        downloadModelButton.setOnClickListener {
+            when (modelDownload.query()) {
+                is HuggingFaceModelDownload.State.Active -> cancelModelDownload()
+                HuggingFaceModelDownload.State.Complete -> monitorModelDownload()
+                is HuggingFaceModelDownload.State.Failed -> {
+                    modelDownload.clearTracking()
+                    showModelDownloadConfirmation()
+                }
+                HuggingFaceModelDownload.State.Idle -> {
+                    if (modelDownload.isVerified()) {
+                        loadVerifiedDownloadedModel()
+                    } else {
+                        showModelDownloadConfirmation()
+                    }
+                }
+            }
         }
         sendButton.setOnClickListener {
             if (generationJob?.isActive == true) generationJob?.cancel() else sendPrompt()
@@ -183,6 +227,159 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun showModelDownloadConfirmation() {
+        AlertDialog.Builder(this)
+            .setTitle("Download Gemma 4 E2B Q8_0?")
+            .setMessage(
+                "This downloads ${formatBytes(HuggingFaceModelDownload.MODEL_SIZE_BYTES)} " +
+                    "from the ggml-org repository on Hugging Face. Wi-Fi is recommended. " +
+                    "The model stays in this app's storage and is removed if the app is uninstalled.",
+            )
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton("Download") { _, _ -> startModelDownload() }
+            .show()
+    }
+
+    private fun startModelDownload() {
+        runCatching { modelDownload.enqueue() }
+            .onSuccess {
+                modelText.text = HuggingFaceModelDownload.MODEL_FILENAME
+                transcriptText.text =
+                    "Downloading Gemma from Hugging Face. You can leave the app; Android will continue the transfer."
+                refreshDownloadButton()
+                monitorModelDownload()
+            }
+            .onFailure { error -> showDownloadError(error.message ?: "Could not start the model download") }
+    }
+
+    private fun cancelModelDownload() {
+        modelDownload.cancel()
+        downloadMonitorJob?.cancel()
+        statusText.text = if (modelReady) engine.accelerationInfo() else "Model download cancelled"
+        if (!modelReady) modelText.text = "No model selected"
+        refreshDownloadButton()
+    }
+
+    private fun monitorModelDownload() {
+        downloadMonitorJob?.cancel()
+        refreshDownloadButton()
+        if (!modelDownload.hasTrackedDownload) return
+
+        downloadMonitorJob = lifecycleScope.launch {
+            while (isActive && modelDownload.hasTrackedDownload) {
+                when (val state = withContext(Dispatchers.IO) { modelDownload.query() }) {
+                    is HuggingFaceModelDownload.State.Active -> showDownloadProgress(state)
+                    HuggingFaceModelDownload.State.Complete -> {
+                        finishModelDownload()
+                        break
+                    }
+                    is HuggingFaceModelDownload.State.Failed -> {
+                        withContext(Dispatchers.IO) { modelDownload.discardInvalidFile() }
+                        showDownloadError("Model download failed (${downloadFailureMessage(state.reason)}).")
+                        refreshDownloadButton()
+                        break
+                    }
+                    HuggingFaceModelDownload.State.Idle -> {
+                        modelDownload.clearTracking()
+                        refreshDownloadButton()
+                        break
+                    }
+                }
+                delay(DOWNLOAD_POLL_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun showDownloadProgress(state: HuggingFaceModelDownload.State.Active) {
+        val total = state.totalBytes.takeIf { it > 0 } ?: HuggingFaceModelDownload.MODEL_SIZE_BYTES
+        val percent = ((state.downloadedBytes * 100) / total).coerceIn(0, 100)
+        val phase = when (state.status) {
+            DownloadManager.STATUS_PAUSED -> "Download paused"
+            DownloadManager.STATUS_PENDING -> "Download queued"
+            else -> "Downloading model"
+        }
+        statusText.text = "$phase · $percent% · ${formatBytes(state.downloadedBytes)} / ${formatBytes(total)}"
+        modelText.text = HuggingFaceModelDownload.MODEL_FILENAME
+    }
+
+    private suspend fun finishModelDownload() {
+        updateStatus("Verifying downloaded model…")
+        val verified = withContext(Dispatchers.IO) { modelDownload.verifyAndRemember() }
+        if (!verified) {
+            withContext(Dispatchers.IO) { modelDownload.discardInvalidFile() }
+            showDownloadError("The downloaded model failed its size or SHA-256 check and was removed.")
+            refreshDownloadButton()
+            return
+        }
+
+        modelDownload.clearTracking()
+        refreshDownloadButton()
+        if (runtimeReady && !modelReady) {
+            withContext(Dispatchers.IO) { loadModelFile(modelDownload.destinationFile) }
+        } else {
+            statusText.text = if (modelReady) engine.accelerationInfo() else "Model downloaded and verified"
+            Toast.makeText(this, "Gemma model downloaded and verified", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private suspend fun verifiedDownloadedModel(): File? {
+        val file = modelDownload.destinationFile
+        if (!file.isFile || file.length() != HuggingFaceModelDownload.MODEL_SIZE_BYTES) return null
+        val state = withContext(Dispatchers.IO) { modelDownload.query() }
+        if (state is HuggingFaceModelDownload.State.Active || state is HuggingFaceModelDownload.State.Failed) {
+            return null
+        }
+        if (!modelDownload.isVerified()) {
+            updateStatus("Verifying downloaded model…")
+            if (!withContext(Dispatchers.IO) { modelDownload.verifyAndRemember() }) {
+                withContext(Dispatchers.IO) { modelDownload.discardInvalidFile() }
+                return null
+            }
+        }
+        modelDownload.clearTracking()
+        return file
+    }
+
+    private fun loadVerifiedDownloadedModel() {
+        if (!runtimeReady || modelReady) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            runCatching {
+                verifiedDownloadedModel()?.let { loadModelFile(it) }
+                    ?: error("The downloaded model is incomplete or invalid")
+            }.onFailure { error ->
+                Log.e(TAG, "Downloaded model load failed", error)
+                withContext(Dispatchers.Main) {
+                    showError(error.message ?: "Could not load the downloaded model")
+                }
+            }
+        }
+    }
+
+    private fun refreshDownloadButton() {
+        downloadModelButton.text = when {
+            modelDownload.hasTrackedDownload -> getString(R.string.cancel_download)
+            modelDownload.isVerified() -> getString(R.string.model_downloaded)
+            else -> getString(R.string.download_model)
+        }
+        downloadModelButton.isEnabled = runtimeReady || modelDownload.hasTrackedDownload
+    }
+
+    private fun downloadFailureMessage(reason: Int): String = when (reason) {
+        DownloadManager.ERROR_INSUFFICIENT_SPACE -> "not enough storage"
+        DownloadManager.ERROR_CANNOT_RESUME -> "the transfer could not resume"
+        DownloadManager.ERROR_DEVICE_NOT_FOUND -> "storage is unavailable"
+        DownloadManager.ERROR_FILE_ERROR -> "file storage error"
+        DownloadManager.ERROR_HTTP_DATA_ERROR -> "Hugging Face network error"
+        DownloadManager.ERROR_TOO_MANY_REDIRECTS -> "too many redirects"
+        else -> "reason $reason"
+    }
+
+    private fun showDownloadError(message: String) {
+        statusText.text = if (modelReady) engine.accelerationInfo() else "Model download failed"
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        refreshDownloadButton()
     }
 
     private suspend fun loadModelFile(modelFile: File) = modelLoadMutex.withLock {
@@ -304,6 +501,7 @@ class MainActivity : AppCompatActivity() {
         promptInput.isEnabled = enabled && modelReady
         sendButton.isEnabled = enabled && modelReady
         modelButton.isEnabled = enabled
+        downloadModelButton.isEnabled = enabled || modelDownload.hasTrackedDownload
     }
 
     private suspend fun updateStatus(message: String) = withContext(Dispatchers.Main) {
@@ -352,10 +550,12 @@ class MainActivity : AppCompatActivity() {
         statusText.text = "Model not loaded"
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         modelButton.isEnabled = true
+        downloadModelButton.isEnabled = true
     }
 
     override fun onDestroy() {
         generationJob?.cancel()
+        downloadMonitorJob?.cancel()
         // The engine is process-scoped. Android owns its native memory when the process exits;
         // destroying it for an Activity recreation would invalidate the singleton for the new UI.
         super.onDestroy()
@@ -377,6 +577,7 @@ class MainActivity : AppCompatActivity() {
         private const val MAX_QMX_LAYERS = 64
         private const val COPY_BUFFER_BYTES = 4 * 1024 * 1024
         private const val FREE_SPACE_HEADROOM = 512L * 1024 * 1024
+        private const val DOWNLOAD_POLL_INTERVAL_MS = 1_000L
 
         private fun formatBytes(bytes: Long): String = when {
             bytes < 0 -> "unknown size"
