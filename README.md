@@ -29,11 +29,19 @@ load_tensors: CPU_KLEIDIAI model buffer size = 430.27 MiB
 The APK contains CPU backend variants and `libkleidiai.so`; it does not package a
 Vulkan, OpenCL, QNN, or other GPU/NPU inference backend.
 
-The phone cannot keep a full Q8 repack inside the tested Android process memory
-policy. The sample therefore places **6 of 35 transformer blocks** in the
+`CPU_KLEIDIAI` is normal app process memory, typically backed by DRAM, that
+holds repacked model weights in the layout used by KleidiAI's QMX/SME CPU
+kernels. It is not L2 cache. QMX does not accelerate every operation in Gemma or
+Llama; it primarily targets supported linear projection work such as GEMM/GEMV.
+Other model work, including parts of attention during decode, still runs on CPU
+paths outside the QMX-friendly kernels.
+
+The phone cannot keep every supported Q8 tensor repacked inside this full
+Android app process at all settings. The sample therefore defaults to placing
+the supported tensors from **6 of 35 transformer blocks** in the
 `CPU_KLEIDIAI` buffer and memory-maps the remaining tensors. QMX is genuinely
-executed, but this partial allocation will not reproduce Qualcomm's published
-full-model maximum speedups.
+executed, but this partial allocation will not reproduce Qualcomm's standalone
+native benchmark setup exactly.
 
 ## Prerequisites
 
@@ -146,7 +154,7 @@ Expected QMX evidence includes:
 loaded CPU backend ...libggml-cpu-android_armv9.2_2.so
 kleidiai: primary q8 kernel feature SME
 kleidiai: SME enabled
-Loading 6 transformer blocks with QMX; remaining tensors stay memory-mapped
+Loading supported tensors from 6 transformer blocks with QMX; remaining tensors stay memory-mapped
 CPU_KLEIDIAI model buffer size = 430.27 MiB
 Assistant generation complete
 ```
@@ -202,12 +210,14 @@ For four threads, repeat both commands with `--ei bench_threads 4`. Discard the
 first result as a warm-up when comparing modes. The result table is displayed in
 the app and emitted as `QMX_BENCH_RESULT` in logcat.
 
-`qmx_layers` controls how many leading transformer blocks are copied into the
-KleidiAI repacking buffer. It defaults to 6 and is clamped to 1–64; values above
-the model's block count simply select every block. Always force-stop the app
-before changing it because the native engine is process-scoped. Increase the
-value gradually (for example 8, 10, 12) and confirm that model loading completes
-before benchmarking. A larger value substantially increases peak native memory.
+`qmx_layers` controls how many leading transformer blocks have their supported
+tensors assigned to the KleidiAI repacking buffer. It does not mean every tensor
+or operation in those blocks is QMX-accelerated. The value defaults to 6 and is
+clamped to 1–64; values above the model's block count simply select every block.
+Always force-stop the app before changing it because the native engine is
+process-scoped. Increase the value gradually (for example 8, 10, 12) and confirm
+that model loading completes before benchmarking. A larger value substantially
+increases peak native memory.
 
 `model_name` selects an already imported model by its exact private-storage file
 name. This avoids accidentally benchmarking whichever GGUF was imported most
@@ -253,11 +263,19 @@ conclusion as the means.
 
 Qualcomm's article reports maxima across several Q8 models of 2.9x TTFT and
 1.5x decode for one thread, and 2.0x/1.05x for four threads. Those measurements
-used explicitly fixed CPU frequencies and a NEON-only baseline. This app reports
-prompt-processing throughput rather than exact end-to-end UI TTFT, uses an I8MM
-control, and repacks only six layers, so its values are not a reproduction of
-Qualcomm's full benchmark configuration:
+used a standalone native binary through `adb shell`, explicitly fixed CPU
+frequencies, and a NEON-only baseline. This app reports prompt-processing
+throughput rather than exact end-to-end UI TTFT, uses an I8MM control in the
+simple `GGML_KLEIDIAI_SME=0` A/B run, and repacks only the supported tensors from
+six blocks in the default app configuration. Its values are therefore not a
+reproduction of Qualcomm's full benchmark configuration:
 <https://www.qualcomm.com/developer/blog/2026/04/llama-models-acceleration-on-cpu-qmx>
+
+Qualcomm also clarified that `GGML_KLEIDIAI_SME=0` disables SME kernels only; it
+may still select KleidiAI I8MM/NEON kernels. They benchmarked end-to-end
+prefill and decode throughput rather than layer-level buffer placement, so their
+published results do not directly state how many tensors were repacked into
+`CPU_KLEIDIAI`.
 
 ### Exact blog-snapshot compatibility result
 
@@ -286,7 +304,7 @@ compiled with `-march=armv8-a`, `GGML_CPU_KLEIDIAI=OFF`, and
 `GGML_CPU_ALL_VARIANTS=OFF`. The APK contained one generic `libggml-cpu.so`; its
 runtime emitted no KleidiAI kernel selection and allocated no `CPU_KLEIDIAI`
 buffer. The QMX APK reported the SME Q8 kernel, SME enabled, and a 3,613.60 MiB
-KleidiAI buffer for 20 of Gemma 3's 34 blocks.
+KleidiAI buffer for the supported tensors from 20 of Gemma 3's 34 blocks.
 
 Both APKs ran six 128-token prefill plus 128-token decode trials in the foreground
 with Android fixed-performance mode enabled. The context was 256 tokens, batch
@@ -308,20 +326,21 @@ paths showed late thermal decline, especially generic-NEON prefill. These are
 therefore real device measurements, but not a claim of laboratory-equivalent
 frequency control.
 
-For this model and device state, 20/34 was the highest repeatably benchmarkable
-QMX placement. 21 blocks (3,794.28 MiB) loaded and completed a two-run test once,
-but Android's low-memory manager killed a later fresh load. 22 blocks (3,974.96
-MiB) was consistently killed before context initialization. Values from 6
-through 20 in two-block increments all completed model loading.
+For this model and device state, layer-fit testing reached 30/34 blocks before
+the QMX/KleidiAI repacked buffer plus the mapped model and Android app runtime
+became the practical memory limit. The table above remains labeled 20/34 because
+that was the matched QMX-versus-generic-NEON run captured with stable
+measurements on both APKs.
 
 ## Implementation notes
 
 - `lib/src/main/cpp/CMakeLists.txt` builds all Arm64 CPU variants and enables
   `GGML_CPU_KLEIDIAI` for `arm64-v8a`.
 - `MainActivity` sets `GGML_KLEIDIAI_SME` before `AiChat` loads native code.
-- `ai_chat.cpp` assigns the requested leading transformer blocks to the regular
-  CPU buffer type, allowing CPU_KLEIDIAI repacking; other tensors remain mapped.
-  The `qmx_layers` intent extra sets `QMX_ACCELERATED_LAYERS` before model load.
+- `ai_chat.cpp` assigns supported tensors from the requested leading transformer
+  blocks to the regular CPU buffer type, allowing CPU_KLEIDIAI repacking; other
+  tensors remain mapped. The `qmx_layers` intent extra sets
+  `QMX_ACCELERATED_LAYERS` before model load.
 - Runtime status is driven by captured llama.cpp logs rather than build-time
   configuration alone.
 - The model context is 2048 tokens with a 128-token batch.
@@ -337,9 +356,11 @@ is not proof that a compatible SME kernel was selected.
 
 ### App dies while loading
 
-A full Q8 repack requires several additional gigabytes. Keep `qmx_layers` at six
-unless you have measured additional process memory headroom. Android may kill
-the process without a Java exception when the native allocation is too large.
+A larger Q8 repack requires several additional gigabytes. Keep `qmx_layers` at
+six unless you have measured additional process memory headroom. Android may
+kill the process without a Java exception when the native allocation is too
+large. For context lengths around 4096 tokens or higher, consider testing KV
+cache quantization to reduce memory pressure.
 
 ### CMake or NDK mismatch
 
