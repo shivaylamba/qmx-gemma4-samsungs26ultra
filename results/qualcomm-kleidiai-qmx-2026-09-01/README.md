@@ -7,7 +7,8 @@ SME matrix data types but does not report `sme2`, so this is the SME1 path.
 
 ## Source and binary proof
 
-- llama.cpp fork commit: `90c5166c6248e2cab262ff155357769de3503e25`
+- upstream llama.cpp base commit: `2e92ecd0247d25f09797f8fdb044a166522fc05d`
+- app-owned integration patch: `patches/llama.cpp-qualcomm-qmx.patch`
 - Qualcomm KleidiAI QMX commit: `8316de1358b5c3589120af0f3d99477e7c16b2e7`
 - The packaged Armv9.2 backend exports the exact Qualcomm
   `qmx_mopa` and `qmx_dot` kernel and run symbols.
@@ -19,6 +20,16 @@ SME matrix data types but does not report `sme2`, so this is the SME1 path.
   execution marker.
 
 The direct lines are retained in [`runtime-evidence.txt`](runtime-evidence.txt).
+
+## Automatic layer-selection validation
+
+The final APK was also installed and run without a `qmx_layers` intent extra.
+For Gemma 4 E2B Q8_0, the app measured a two-block 138.90 MiB QMX probe and,
+from 6,993 MiB of available memory at launch, selected 8 of 35 blocks. It
+purged the unloaded probe allocation, reloaded a 569.17 MiB
+`CPU_KLEIDIAI` buffer, reported `active=true`, and executed both the Qualcomm
+QMX GEMM/prefill and GEMV/decode kernels. This is a diagnostic validation of
+the automatic path, not an additional warmed benchmark comparison.
 
 ## Method
 

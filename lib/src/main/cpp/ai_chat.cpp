@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <malloc.h>
 #include <string>
 #include <unistd.h>
 #include <sampling.h>
@@ -35,7 +36,7 @@ constexpr int   N_THREADS_HEADROOM      = 2;
 constexpr int   DEFAULT_CONTEXT_SIZE    = 2048;
 constexpr int   OVERFLOW_HEADROOM       = 4;
 constexpr int   BATCH_SIZE              = 128;
-constexpr int   DEFAULT_QMX_ACCELERATED_LAYERS = 6;
+constexpr int   FALLBACK_QMX_PROBE_LAYERS      = 2;
 constexpr int   MAX_QMX_ACCELERATED_LAYERS     = 64;
 constexpr float DEFAULT_SAMPLER_TEMP    = 0.3f;
 
@@ -47,18 +48,18 @@ static common_sampler                   * g_sampler;
 static std::atomic<bool>                  g_sme_enabled(false);
 static std::atomic<bool>                  g_q8_sme_kernel(false);
 static std::atomic<int>                   g_kleidiai_buffer_centimib(0);
-static std::atomic<int>                   g_qmx_accelerated_layers(DEFAULT_QMX_ACCELERATED_LAYERS);
+static std::atomic<int>                   g_qmx_accelerated_layers(FALLBACK_QMX_PROBE_LAYERS);
 
 static int requested_qmx_layers() {
     const char *value = std::getenv("QMX_ACCELERATED_LAYERS");
     if (value == nullptr || *value == '\0') {
-        return DEFAULT_QMX_ACCELERATED_LAYERS;
+        return FALLBACK_QMX_PROBE_LAYERS;
     }
     char *end = nullptr;
     const long parsed = std::strtol(value, &end, 10);
     if (end == value || *end != '\0') {
         LOGw("Ignoring invalid QMX_ACCELERATED_LAYERS=%s", value);
-        return DEFAULT_QMX_ACCELERATED_LAYERS;
+        return FALLBACK_QMX_PROBE_LAYERS;
     }
     return (int) std::max(1L, std::min((long) MAX_QMX_ACCELERATED_LAYERS, parsed));
 }
@@ -102,8 +103,8 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_init(JNIEnv *env, jobject /*unu
 extern "C"
 JNIEXPORT jint JNICALL
 Java_com_arm_aichat_internal_InferenceEngineImpl_load(JNIEnv *env, jobject, jstring jmodel_path) {
-    g_sme_enabled.store(false);
-    g_q8_sme_kernel.store(false);
+    // Backend/kernel selection is process-scoped and is logged only once by
+    // KleidiAI. Keep those observations across an automatic probe/reload.
     g_kleidiai_buffer_centimib.store(0);
     llama_model_params model_params = llama_model_default_params();
 
@@ -229,6 +230,25 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_nativeAccelerationInfo(
         result << "CPU fallback · no QMX model buffer observed";
     }
     return env->NewStringUTF(result.str().c_str());
+}
+
+extern "C"
+JNIEXPORT jlongArray JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_nativeQmxRuntimeStats(
+        JNIEnv *env, jobject /*unused*/) {
+    const int buffer_centimib = g_kleidiai_buffer_centimib.load();
+    const bool qmx_active = g_sme_enabled.load() && g_q8_sme_kernel.load() && buffer_centimib > 0;
+    const jlong values[] = {
+            qmx_active ? 1L : 0L,
+            (jlong) buffer_centimib,
+            (jlong) g_qmx_accelerated_layers.load(),
+            (jlong) (g_model == nullptr ? 0 : llama_model_n_layer(g_model)),
+    };
+    jlongArray result = env->NewLongArray(4);
+    if (result != nullptr) {
+        env->SetLongArrayRegion(result, 0, 4, values);
+    }
+    return result;
 }
 
 extern "C"
@@ -652,6 +672,14 @@ Java_com_arm_aichat_internal_InferenceEngineImpl_unload(JNIEnv * /*unused*/, job
     llama_batch_free(g_batch);
     llama_free(g_context);
     llama_model_free(g_model);
+    g_context = nullptr;
+    g_model = nullptr;
+
+    // The automatic selector intentionally loads a small calibration model and
+    // immediately unloads it. Ask Android's allocator to return those freed
+    // pages before the final, larger repack instead of retaining two layouts.
+    LOGi("Native heap purge after model unload: %s",
+         mallopt(M_PURGE_ALL, 0) == 1 ? "complete" : "not supported");
 }
 
 extern "C"

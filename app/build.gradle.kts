@@ -57,4 +57,5 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.material)
+    testImplementation(libs.junit)
 }

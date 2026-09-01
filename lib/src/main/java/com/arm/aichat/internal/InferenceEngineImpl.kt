@@ -3,6 +3,7 @@ package com.arm.aichat.internal
 import android.content.Context
 import android.util.Log
 import com.arm.aichat.InferenceEngine
+import com.arm.aichat.QmxRuntimeStats
 import com.arm.aichat.UnsupportedArchitectureException
 import com.arm.aichat.internal.InferenceEngineImpl.Companion.getInstance
 import dalvik.annotation.optimization.FastNative
@@ -93,6 +94,8 @@ internal class InferenceEngineImpl private constructor(
 
     @FastNative
     private external fun nativeAccelerationInfo(): String
+
+    private external fun nativeQmxRuntimeStats(): LongArray
 
     @FastNative
     private external fun benchModel(pp: Int, tg: Int, pl: Int, nr: Int, threads: Int): String
@@ -217,6 +220,17 @@ internal class InferenceEngineImpl private constructor(
         }
 
     override fun accelerationInfo(): String = nativeAccelerationInfo()
+
+    override fun qmxRuntimeStats(): QmxRuntimeStats {
+        val values = nativeQmxRuntimeStats()
+        require(values.size == 4) { "Native QMX stats returned ${values.size} values" }
+        return QmxRuntimeStats(
+            active = values[0] != 0L,
+            bufferMiB = values[1] / 100.0,
+            selectedLayers = values[2].toInt(),
+            totalLayers = values[3].toInt(),
+        )
+    }
 
     override suspend fun resetConversation() =
         withContext(llamaDispatcher) {

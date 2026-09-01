@@ -7,8 +7,8 @@ cpu_features=sve sve2 svei8mm i8mm sme smei8i32 smef16f32 smeb16f32 smef32f32
 cpu_features_not_reported=sme2
 
 Pinned sources
-llama.cpp=90c5166c6248e2cab262ff155357769de3503e25
 llama.cpp_base=2e92ecd0247d25f09797f8fdb044a166522fc05d
+llama.cpp_integration=patches/llama.cpp-qualcomm-qmx.patch
 qualcomm_kleidiai_qmx=8316de1358b5c3589120af0f3d99477e7c16b2e7
 
 Packaged native symbols
@@ -43,7 +43,17 @@ kleidiai: primary q8 kernel feature I8MM
 kleidiai: SME disabled
 load_tensors: CPU_KLEIDIAI model buffer size = 227.11 MiB
 
+Gemma 4 automatic layer selection
+QMX_BENCH_CONFIG sme=1 layers=auto(probe=2)
+load_tensors: CPU_KLEIDIAI model buffer size = 138.90 MiB
+QMX_AUTO_PLAN availableMiB=6993 modelMiB=4737 probe=2/35@138.9MiB budgetMiB=720.23 selected=8
+Native heap purge after model unload: complete
+load_tensors: CPU_KLEIDIAI model buffer size = 569.17 MiB
+QMX_AUTO_RESULT QmxRuntimeStats(active=true, bufferMiB=569.17, selectedLayers=8, totalLayers=35)
+kleidiai: executing Qualcomm QMX Q8 SME1 GEMM/prefill kernel (m=128 n=2048 k=1536)
+kleidiai: executing Qualcomm QMX Q8 SME1 GEMV/decode kernel (m=1 n=2048 k=1536)
+
 APK
 path=app/build/outputs/apk/debug/app-debug.apk
-size_bytes=72168448
-sha256=AE0F9D1F9EDE8887749BB33D7A2859781538B273B73694472A2D85BB76703212
+size_bytes=91347934
+sha256=2948A9CBEF13821E51E6D2F6533EFAC4D2E668D72586EB27E3ED438664F257B7

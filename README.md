@@ -6,9 +6,10 @@ Prompts, conversation history, and model inference remain on the phone.
 
 This build pins Qualcomm's [`kleidi-ai-qmx`](https://github.com/qualcomm/kleidiai/tree/kleidi-ai-qmx)
 source at commit `8316de1358b5c3589120af0f3d99477e7c16b2e7` and replaces
-llama.cpp's normal fetched KleidiAI release at CMake configure time. The pinned
-llama.cpp fork binds Q8 SME1 GEMM and GEMV dispatch to Qualcomm's explicit
-`qmx_mopa` and `qmx_dot` symbols.
+llama.cpp's normal fetched KleidiAI release at CMake configure time. An
+app-owned patch binds the pinned upstream llama.cpp Q8 SME1 GEMM and GEMV
+dispatch to Qualcomm's explicit `qmx_mopa` and `qmx_dot` symbols. No llama.cpp
+fork or upstream pull request is required.
 
 The verified device is Samsung `SM-S948B` with Qualcomm `SM8850`. Its Android
 CPU feature list contains `sme` and the SME1 matrix data types but not `sme2`,
@@ -21,9 +22,14 @@ so the tested QMX dispatch is SME1. The app has:
 - an in-app, persistent Hugging Face download with progress, cancellation, and
   SHA-256 verification;
 - an ADB-triggerable 128-token QMX-versus-non-SME benchmark;
+- model-aware, live-memory-aware selection of QMX-repacked transformer blocks;
 - automatic reload of the most recently imported or downloaded GGUF.
 
 ![Two-turn on-device chat](qmx-multiturn.png)
+
+For a source-level comparison with Kartikey's QMX-CPU sample, including why a
+270M model does not need the same layer planner as a 4B Android app, see
+[`docs/qmx-cpu-comparison.md`](docs/qmx-cpu-comparison.md).
 
 ## What “QMX active” means here
 
@@ -54,11 +60,13 @@ Other model work, including parts of attention during decode, still runs on CPU
 paths outside the QMX-friendly kernels.
 
 The phone cannot keep every supported Q8 tensor repacked inside this full
-Android app process at all settings. The sample therefore defaults to placing
-the supported tensors from **6 of 35 transformer blocks** in the
-`CPU_KLEIDIAI` buffer and memory-maps the remaining tensors. QMX is genuinely
-executed, but this partial allocation will not reproduce Qualcomm's standalone
-native benchmark setup exactly.
+Android app process at all settings. The normal app path therefore selects the
+layer count automatically. It first loads a two-layer calibration probe, reads
+the real `CPU_KLEIDIAI` allocation, combines that model-specific packing density
+with Android's current available memory, the GGUF size, low-memory threshold,
+KV/app reserve, and a 25% safety margin, then reloads with the calculated count.
+The remaining tensors stay memory-mapped. Controlled benchmarks can still set
+an explicit layer count through ADB.
 
 ## Prerequisites
 
@@ -82,9 +90,10 @@ cd qmx-gemma4-samsungs26ultra
 powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1
 ```
 
-The setup script initializes the pinned llama.cpp fork and Qualcomm KleidiAI QMX
-submodules. It also idempotently checks the small Gemma
-`enable_thinking=false` template change so the UI streams only the final answer.
+The setup script initializes the pinned upstream llama.cpp and Qualcomm
+KleidiAI QMX submodules. It idempotently applies both app-owned patches from
+`patches/`: the QMX SME1 kernel binding and the small Gemma
+`enable_thinking=false` template change.
 
 If Android Studio has not created `local.properties`, create it with your SDK
 path, for example:
@@ -184,8 +193,9 @@ loaded CPU backend ...libggml-cpu-android_armv9.2_2.so
 kleidiai: primary q8 kernel feature SME
 kleidiai: Qualcomm QMX Q8 SME1 kernels selected (qmx_mopa + qmx_dot)
 kleidiai: SME enabled
-Loading 6 transformer blocks with QMX; remaining tensors stay memory-mapped
-CPU_KLEIDIAI model buffer size = 430.27 MiB
+QMX_AUTO_PLAN ... probe=2/35@...MiB ... selected=...
+Loading ... transformer blocks with QMX; remaining tensors stay memory-mapped
+CPU_KLEIDIAI model buffer size = ... MiB
 kleidiai: executing Qualcomm QMX Q8 SME1 GEMM/prefill kernel (m=128 n=2048 k=1536)
 kleidiai: executing Qualcomm QMX Q8 SME1 GEMV/decode kernel (m=1 n=2048 k=1536)
 Assistant generation complete
@@ -243,14 +253,14 @@ For four threads, repeat both commands with `--ei bench_threads 4`. Discard the
 first result as a warm-up when comparing modes. The result table is displayed in
 the app and emitted as `QMX_BENCH_RESULT` in logcat.
 
-`qmx_layers` controls how many leading transformer blocks have their supported
-tensors assigned to the KleidiAI repacking buffer. It does not mean every tensor
-or operation in those blocks is QMX-accelerated. The value defaults to 6 and is
-clamped to 1–64; values above the model's block count simply select every block.
-Always force-stop the app before changing it because the native engine is
-process-scoped. Increase the value gradually (for example 8, 10, 12) and confirm
-that model loading completes before benchmarking. A larger value substantially
-increases peak native memory.
+`qmx_layers` is an optional benchmark override controlling how many leading
+transformer blocks have their supported tensors assigned to the KleidiAI
+repacking buffer. It does not mean every tensor or operation in those blocks is
+QMX-accelerated. When this extra is omitted, the app performs automatic
+model-specific, memory-aware selection. When supplied, it is clamped to 1–64;
+values above the model's block count select every block. Always force-stop the
+app before changing an explicit override because the native engine is
+process-scoped. A larger value substantially increases peak native memory.
 
 `model_name` selects an already imported model by its exact private-storage file
 name. This avoids accidentally benchmarking whichever GGUF was imported most
@@ -298,8 +308,8 @@ Qualcomm's article reports maxima across several Q8 models of 2.9x TTFT and
 used a standalone native binary through `adb shell`, explicitly fixed CPU
 frequencies, and a NEON-only baseline. This app reports prompt-processing
 throughput rather than exact end-to-end UI TTFT, uses an I8MM control in the
-simple `GGML_KLEIDIAI_SME=0` A/B run, and repacks only the supported tensors from
-six blocks in the default app configuration. Its values are therefore not a
+simple `GGML_KLEIDIAI_SME=0` A/B run, and used an explicit six-block override
+for the matched validation. Its values are therefore not a
 reproduction of Qualcomm's full benchmark configuration:
 <https://www.qualcomm.com/developer/blog/2026/04/llama-models-acceleration-on-cpu-qmx>
 
@@ -322,9 +332,9 @@ The exact snapshot's QMX command repacked the full model and then terminated
 with `SIGILL` inside `libggml-cpu.so`. The phone reports base SME but not SME2,
 while that snapshot selects SME2-named Q8 kernels from its base-SME feature
 check. Therefore an exact binary-for-binary reproduction is not safe on this
-device. The llama.cpp fork pinned by this app uses Qualcomm's explicit SME1
-`qmx_mopa` and `qmx_dot` kernels successfully, as demonstrated by the runtime
-execution evidence above. A fair article-style comparison must pair that
+device. The app-owned llama.cpp patch uses Qualcomm's explicit SME1 `qmx_mopa`
+and `qmx_dot` kernels successfully, as demonstrated by the runtime execution
+evidence above. A fair article-style comparison must pair that
 corrected QMX runtime with a separately compiled generic-NEON runner; toggling only
 `GGML_KLEIDIAI_SME` does not create Qualcomm's stated NEON baseline.
 
@@ -400,14 +410,16 @@ memory-pressure outcome. The generic-NEON baseline completed normally.
   `GGML_CPU_KLEIDIAI` for `arm64-v8a`. It sets CMake's
   `FETCHCONTENT_SOURCE_DIR_KLEIDIAI_DOWNLOAD` override to the pinned
   `third_party/kleidiai-qmx` submodule.
-- The pinned llama.cpp fork replaces its Q8 SME1 source entries with Qualcomm's
-  `qmx_mopa` and `qmx_dot` files, binds the kernel table to those exact symbols,
-  and logs their actual prefill/decode invocation once per process.
+- `patches/llama.cpp-qualcomm-qmx.patch`, owned and versioned by this app
+  repository, replaces the pinned upstream llama.cpp Q8 SME1 source entries with
+  Qualcomm's `qmx_mopa` and `qmx_dot` files, binds the kernel table to those
+  exact symbols, and logs their actual prefill/decode invocation once per process.
 - `MainActivity` sets `GGML_KLEIDIAI_SME` before `AiChat` loads native code.
 - `ai_chat.cpp` assigns supported tensors from the requested leading transformer
   blocks to the regular CPU buffer type, allowing CPU_KLEIDIAI repacking; other
-  tensors remain mapped. The `qmx_layers` intent extra sets
-  `QMX_ACCELERATED_LAYERS` before model load.
+  tensors remain mapped. Normal launches calibrate a two-layer probe and select
+  the final count from live memory headroom. The `qmx_layers` intent extra sets
+  an explicit `QMX_ACCELERATED_LAYERS` value for repeatable benchmarks.
 - Runtime status is driven by captured llama.cpp logs rather than build-time
   configuration alone.
 - The model context is 2048 tokens with a 128-token batch.
@@ -423,11 +435,12 @@ is not proof that a compatible SME kernel was selected.
 
 ### App dies while loading
 
-A larger Q8 repack requires several additional gigabytes. Keep `qmx_layers` at
-six unless you have measured additional process memory headroom. Android may
-kill the process without a Java exception when the native allocation is too
-large. For context lengths around 4096 tokens or higher, consider testing KV
-cache quantization to reduce memory pressure.
+A larger Q8 repack requires several additional gigabytes. Leave `qmx_layers`
+unset for normal use so automatic selection reserves memory for Android, the
+mapped GGUF, app/context allocations, and KV cache. If an explicit benchmark
+override is too large, Android may kill the process without a Java exception.
+For context lengths around 4096 tokens or higher, consider testing KV cache
+quantization to reduce memory pressure.
 
 ### CMake or NDK mismatch
 
@@ -445,6 +458,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1
 
 ## Third-party software and model terms
 
-The llama.cpp fork and Qualcomm KleidiAI QMX are pinned as Git submodules and
-retain their respective upstream licenses. Gemma weights are downloaded
+Upstream llama.cpp and Qualcomm KleidiAI QMX are pinned as Git submodules and
+retain their respective upstream licenses. The llama.cpp integration changes
+are stored as patches in this app repository. Gemma weights are downloaded
 separately and remain subject to their model-card terms.

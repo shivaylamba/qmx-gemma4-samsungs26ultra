@@ -1,5 +1,6 @@
 package com.example.qmxgemma
 
+import android.app.ActivityManager
 import android.app.DownloadManager
 import android.database.Cursor
 import android.net.Uri
@@ -22,6 +23,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.arm.aichat.AiChat
 import com.arm.aichat.InferenceEngine
+import com.arm.aichat.gguf.GgufMetadataReader
 import com.google.android.material.textfield.TextInputEditText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -59,6 +61,8 @@ class MainActivity : AppCompatActivity() {
     private var benchmarkStarted = false
     @Volatile
     private var runtimeReady = false
+    private var qmxMode = "1"
+    private var explicitQmxLayers: Int? = null
 
     private val chooseModel = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(::importAndLoadModel)
@@ -85,12 +89,21 @@ class MainActivity : AppCompatActivity() {
         // Qualcomm's documented runtime switch. ADB may override it for controlled A/B tests.
         // KleidiAI still checks the CPU capability,
         // so unsupported devices safely use another compiled CPU backend.
-        val qmxMode = intent.getStringExtra(EXTRA_QMX_MODE)?.takeIf { it == "0" || it == "1" } ?: "1"
-        val qmxLayers = intent.getIntExtra(EXTRA_QMX_LAYERS, DEFAULT_QMX_LAYERS)
-            .coerceIn(1, MAX_QMX_LAYERS)
+        qmxMode = intent.getStringExtra(EXTRA_QMX_MODE)?.takeIf { it == "0" || it == "1" } ?: "1"
+        explicitQmxLayers = if (intent.hasExtra(EXTRA_QMX_LAYERS)) {
+            intent.getIntExtra(EXTRA_QMX_LAYERS, AUTO_QMX_PROBE_LAYERS)
+                .coerceIn(1, MAX_QMX_LAYERS)
+        } else {
+            null
+        }
+        val initialQmxLayers = explicitQmxLayers ?: AUTO_QMX_PROBE_LAYERS
         Os.setenv(QMX_ENVIRONMENT_VARIABLE, qmxMode, true)
-        Os.setenv(QMX_LAYERS_ENVIRONMENT_VARIABLE, qmxLayers.toString(), true)
-        Log.i(TAG, "QMX_BENCH_CONFIG sme=$qmxMode layers=$qmxLayers")
+        Os.setenv(QMX_LAYERS_ENVIRONMENT_VARIABLE, initialQmxLayers.toString(), true)
+        Log.i(
+            TAG,
+            "QMX_BENCH_CONFIG sme=$qmxMode " +
+                "layers=${explicitQmxLayers ?: "auto(probe=$initialQmxLayers)"}",
+        )
 
         lifecycleScope.launch(Dispatchers.Default) {
             engine = AiChat.getInferenceEngine(applicationContext)
@@ -384,8 +397,12 @@ class MainActivity : AppCompatActivity() {
 
     private suspend fun loadModelFile(modelFile: File) = modelLoadMutex.withLock {
         if (!modelReady) {
-            updateStatus("Loading ${modelFile.nameWithoutExtension} into memory…")
-            engine.loadModel(modelFile.absolutePath)
+            if (qmxMode == "1" && explicitQmxLayers == null) {
+                loadModelWithAutomaticQmxLayers(modelFile)
+            } else {
+                updateStatus("Loading ${modelFile.nameWithoutExtension} into memory…")
+                engine.loadModel(modelFile.absolutePath)
+            }
             engine.setSystemPrompt(
                 "You are Gemma, a concise and helpful assistant running privately on this phone."
             )
@@ -399,6 +416,54 @@ class MainActivity : AppCompatActivity() {
             setControlsEnabled(true)
         }
         runRequestedBenchmark()
+    }
+
+    private suspend fun loadModelWithAutomaticQmxLayers(modelFile: File) {
+        val totalLayers = modelFile.inputStream().buffered().use { input ->
+            GgufMetadataReader.create().readStructuredMetadata(input).dimensions?.blockCount
+        } ?: error("The GGUF does not report a transformer block count")
+        require(totalLayers > 0) { "The GGUF reports an invalid transformer block count" }
+
+        val probeLayers = AUTO_QMX_PROBE_LAYERS.coerceAtMost(totalLayers)
+        Os.setenv(QMX_LAYERS_ENVIRONMENT_VARIABLE, probeLayers.toString(), true)
+
+        val activityManager = getSystemService(ActivityManager::class.java)
+        val memoryInfo = ActivityManager.MemoryInfo().also(activityManager::getMemoryInfo)
+        updateStatus("Measuring QMX packing for $probeLayers/$totalLayers layers…")
+        engine.loadModel(modelFile.absolutePath)
+
+        val probe = engine.qmxRuntimeStats()
+        if (!probe.active || probe.bufferMiB <= 0.0 || probe.selectedLayers <= 0) {
+            Log.w(TAG, "QMX auto-selection stopped because the probe did not activate QMX: $probe")
+            return
+        }
+
+        val plan = QmxLayerPlanner.calculate(
+            availableMemoryBytes = memoryInfo.availMem,
+            lowMemoryThresholdBytes = memoryInfo.threshold,
+            modelBytes = modelFile.length(),
+            totalLayers = probe.totalLayers.takeIf { it > 0 } ?: totalLayers,
+            probeLayers = probe.selectedLayers,
+            probeBufferMiB = probe.bufferMiB,
+        )
+        Log.i(
+            TAG,
+            "QMX_AUTO_PLAN availableMiB=${memoryInfo.availMem / MIB_BYTES} " +
+                "modelMiB=${modelFile.length() / MIB_BYTES} " +
+                "probe=${probe.selectedLayers}/${probe.totalLayers}@${probe.bufferMiB}MiB " +
+                "budgetMiB=${"%.2f".format(plan.repackBudgetMiB)} " +
+                "selected=${plan.selectedLayers}",
+        )
+
+        if (plan.selectedLayers == probe.selectedLayers) return
+
+        updateStatus(
+            "QMX selected ${plan.selectedLayers}/$totalLayers layers from live memory headroom…"
+        )
+        engine.cleanUp()
+        Os.setenv(QMX_LAYERS_ENVIRONMENT_VARIABLE, plan.selectedLayers.toString(), true)
+        engine.loadModel(modelFile.absolutePath)
+        Log.i(TAG, "QMX_AUTO_RESULT ${engine.qmxRuntimeStats()}")
     }
 
     private suspend fun runRequestedBenchmark() {
@@ -573,8 +638,9 @@ class MainActivity : AppCompatActivity() {
         private const val EXTRA_BENCH_RUNS = "bench_runs"
         private const val BENCH_PROMPT_TOKENS = 128
         private const val BENCH_DECODE_TOKENS = 128
-        private const val DEFAULT_QMX_LAYERS = 6
+        private const val AUTO_QMX_PROBE_LAYERS = 2
         private const val MAX_QMX_LAYERS = 64
+        private const val MIB_BYTES = 1024L * 1024L
         private const val COPY_BUFFER_BYTES = 4 * 1024 * 1024
         private const val FREE_SPACE_HEADROOM = 512L * 1024 * 1024
         private const val DOWNLOAD_POLL_INTERVAL_MS = 1_000L

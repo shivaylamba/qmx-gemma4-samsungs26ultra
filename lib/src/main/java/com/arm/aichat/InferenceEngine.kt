@@ -33,6 +33,9 @@ interface InferenceEngine {
     /** Describes the acceleration path observed while loading the current model. */
     fun accelerationInfo(): String
 
+    /** Structured QMX measurements from the most recently loaded model. */
+    fun qmxRuntimeStats(): QmxRuntimeStats
+
     /** Clears native chat history and the KV cache, then restores the system prompt. */
     suspend fun resetConversation()
 
@@ -76,6 +79,13 @@ interface InferenceEngine {
         const val DEFAULT_PREDICT_LENGTH = 1024
     }
 }
+
+data class QmxRuntimeStats(
+    val active: Boolean,
+    val bufferMiB: Double,
+    val selectedLayers: Int,
+    val totalLayers: Int,
+)
 
 val State.isUninterruptible
     get() = this is State.Initializing ||

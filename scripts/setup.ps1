@@ -2,33 +2,44 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $llamaDirectory = Join-Path $projectRoot "third_party\llama.cpp-current"
-$patchFile = Join-Path $projectRoot "patches\llama.cpp-gemma4-thinking.patch"
+$patches = @(
+    @{
+        Path = Join-Path $projectRoot "patches\llama.cpp-gemma4-thinking.patch"
+        Label = "Gemma 4 chat-template"
+    },
+    @{
+        Path = Join-Path $projectRoot "patches\llama.cpp-qualcomm-qmx.patch"
+        Label = "Qualcomm QMX SME1"
+    }
+)
 
 git -C $projectRoot submodule update --init --recursive
 if ($LASTEXITCODE -ne 0) {
-    throw "Could not initialize the llama.cpp submodule."
+    throw "Could not initialize the pinned submodules."
 }
 
-$ErrorActionPreference = "Continue"
-git -C $llamaDirectory apply --check $patchFile *> $null
-$patchCanApply = $LASTEXITCODE -eq 0
-$ErrorActionPreference = "Stop"
-
-if ($patchCanApply) {
-    git -C $llamaDirectory apply $patchFile
-    if ($LASTEXITCODE -ne 0) {
-        throw "Could not apply the Gemma 4 chat-template patch."
-    }
-    Write-Host "Applied the Gemma 4 chat-template patch."
-} else {
+foreach ($patch in $patches) {
     $ErrorActionPreference = "Continue"
-    git -C $llamaDirectory apply --reverse --check $patchFile *> $null
-    $patchIsApplied = $LASTEXITCODE -eq 0
+    git -C $llamaDirectory apply --check $patch.Path *> $null
+    $patchCanApply = $LASTEXITCODE -eq 0
     $ErrorActionPreference = "Stop"
-    if (-not $patchIsApplied) {
-        throw "The llama.cpp checkout does not match the pinned patch. Reset the submodule and run setup again."
+
+    if ($patchCanApply) {
+        git -C $llamaDirectory apply $patch.Path
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not apply the $($patch.Label) patch."
+        }
+        Write-Host "Applied the $($patch.Label) patch."
+    } else {
+        $ErrorActionPreference = "Continue"
+        git -C $llamaDirectory apply --reverse --check $patch.Path *> $null
+        $patchIsApplied = $LASTEXITCODE -eq 0
+        $ErrorActionPreference = "Stop"
+        if (-not $patchIsApplied) {
+            throw "The llama.cpp checkout does not match the $($patch.Label) patch. Reset the submodule and run setup again."
+        }
+        Write-Host "$($patch.Label) patch is already applied."
     }
-    Write-Host "Gemma 4 chat-template patch is already applied."
 }
 
 Write-Host "Setup complete. Build with .\gradlew.bat :app:assembleDebug"
