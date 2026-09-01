@@ -4,7 +4,15 @@ A Kotlin Android chat app that runs **Gemma 4 E2B Instruct Q8_0** locally with
 `llama.cpp` and the **CPU KleidiAI SME/QMX path** on a Samsung Galaxy S26 Ultra.
 Prompts, conversation history, and model inference remain on the phone.
 
-The verified device is Samsung `SM-S948B` with Qualcomm `SM8850`. The app has:
+This build pins Qualcomm's [`kleidi-ai-qmx`](https://github.com/qualcomm/kleidiai/tree/kleidi-ai-qmx)
+source at commit `8316de1358b5c3589120af0f3d99477e7c16b2e7` and replaces
+llama.cpp's normal fetched KleidiAI release at CMake configure time. The pinned
+llama.cpp fork binds Q8 SME1 GEMM and GEMV dispatch to Qualcomm's explicit
+`qmx_mopa` and `qmx_dot` symbols.
+
+The verified device is Samsung `SM-S948B` with Qualcomm `SM8850`. Its Android
+CPU feature list contains `sme` and the SME1 matrix data types but not `sme2`,
+so the tested QMX dispatch is SME1. The app has:
 
 - multi-turn chat with native KV-cache and conversation-history retention;
 - a Clear action that resets both UI and native conversation state;
@@ -19,14 +27,21 @@ The verified device is Samsung `SM-S948B` with Qualcomm `SM8850`. The app has:
 
 ## What “QMX active” means here
 
-The label is not based only on requesting `GGML_KLEIDIAI_SME=1`. It appears only
-after the native runtime observes all of the following:
+The label is not based only on requesting `GGML_KLEIDIAI_SME=1`. The strongest
+runtime proof is the complete sequence below:
 
 ```text
 kleidiai: primary q8 kernel feature SME
+kleidiai: Qualcomm QMX Q8 SME1 kernels selected (qmx_mopa + qmx_dot)
 kleidiai: SME enabled (...)
 load_tensors: CPU_KLEIDIAI model buffer size = 430.27 MiB
+kleidiai: executing Qualcomm QMX Q8 SME1 GEMM/prefill kernel (...)
+kleidiai: executing Qualcomm QMX Q8 SME1 GEMV/decode kernel (...)
 ```
+
+The last two lines are emitted inside the KleidiAI execution path immediately
+before the selected kernel's run function is invoked. They confirm real QMX
+execution for prefill and decode rather than only successful kernel selection.
 
 The APK contains CPU backend variants and `libkleidiai.so`; it does not package a
 Vulkan, OpenCL, QNN, or other GPU/NPU inference backend.
@@ -67,10 +82,9 @@ cd qmx-gemma4-samsungs26ultra
 powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1
 ```
 
-The setup script initializes the pinned `llama.cpp` submodule and idempotently
-applies `patches/llama.cpp-gemma4-thinking.patch`. That small patch exposes
-Gemma's `enable_thinking=false` template input so the UI streams only the final
-answer.
+The setup script initializes the pinned llama.cpp fork and Qualcomm KleidiAI QMX
+submodules. It also idempotently checks the small Gemma
+`enable_thinking=false` template change so the UI streams only the final answer.
 
 If Android Studio has not created `local.properties`, create it with your SDK
 path, for example:
@@ -168,14 +182,18 @@ Expected QMX evidence includes:
 ```text
 loaded CPU backend ...libggml-cpu-android_armv9.2_2.so
 kleidiai: primary q8 kernel feature SME
+kleidiai: Qualcomm QMX Q8 SME1 kernels selected (qmx_mopa + qmx_dot)
 kleidiai: SME enabled
-Loading supported tensors from 6 transformer blocks with QMX; remaining tensors stay memory-mapped
+Loading 6 transformer blocks with QMX; remaining tensors stay memory-mapped
 CPU_KLEIDIAI model buffer size = 430.27 MiB
+kleidiai: executing Qualcomm QMX Q8 SME1 GEMM/prefill kernel (m=128 n=2048 k=1536)
+kleidiai: executing Qualcomm QMX Q8 SME1 GEMV/decode kernel (m=1 n=2048 k=1536)
 Assistant generation complete
 ```
 
 For the non-SME control process, the runtime reports the Q8 `I8MM` kernel,
-`SME disabled`, and a 227.11 MiB CPU_KLEIDIAI buffer.
+`SME disabled`, and a 227.11 MiB CPU_KLEIDIAI buffer. It emits neither of the
+Qualcomm QMX execution lines.
 
 ## Run the built-in A/B benchmark
 
@@ -249,32 +267,31 @@ adb shell cmd power set-fixed-performance-mode-enabled false
 adb shell svc power stayon false
 ```
 
-On the verified partial-QMX build, warmed one-thread averages were:
+On the Qualcomm KleidiAI QMX build, six runs were made per mode under Android
+fixed-performance mode and the first was excluded as warm-up. The warmed
+one-thread averages were:
 
 | Gemma 4 E2B Q8_0 test | QMX/SME | Non-SME I8MM | Speedup |
 |---|---:|---:|---:|
-| 128-token prefill | 8.316 tok/s | 8.264 tok/s | 1.006x |
-| Decode | 8.342 tok/s | 8.120 tok/s | 1.027x |
+| 128-token prefill | 8.3086 tok/s | 8.2176 tok/s | 1.0111x |
+| Decode | 8.3293 tok/s | 8.0948 tok/s | 1.0290x |
 
 The blog-linked Unsloth Gemma 3 4B Q8_0 was also tested on the same phone. The
 file was 4,130,402,176 bytes with SHA-256
 `81bf0583ab5bad155a5a3b15d155a880a1a1e4f7de2de5c06f10f64ac49f8336`.
-Six runs were made per mode; the first was excluded as warm-up. Post-warm-up
-means were:
+Post-warm-up means from the same Qualcomm-kernel build were:
 
 | Gemma 3 4B Q8_0 test | Threads | QMX/SME | Non-SME I8MM | Speedup |
 |---|---:|---:|---:|---:|
-| 128-token prefill | 1 | 6.507 tok/s | 6.430 tok/s | 1.012x |
-| Decode | 1 | 6.325 tok/s | 5.887 tok/s | 1.074x |
-| 128-token prefill | 4 | 22.865 tok/s | 22.892 tok/s | 0.999x |
-| Decode | 4 | 12.099 tok/s | 12.828 tok/s | 0.943x |
+| 128-token prefill | 1 | 6.4966 tok/s | 6.4226 tok/s | 1.0115x |
+| Decode | 1 | 6.2839 tok/s | 5.8796 tok/s | 1.0688x |
 
 For Gemma 3, QMX selected the SME Q8 kernel and allocated a 1,084.08 MiB
 `CPU_KLEIDIAI` model buffer; the control selected I8MM, disabled SME, and
 allocated 573.75 MiB. Both modes accelerated only 6 of 34 transformer blocks.
-The four-thread runs showed an end-of-loop thermal/scheduler slowdown in both
-modes; the median speedups (0.998x prefill and 0.935x decode) lead to the same
-conclusion as the means.
+
+The full runtime proof and every per-trial value are in
+[`results/qualcomm-kleidiai-qmx-2026-09-01`](results/qualcomm-kleidiai-qmx-2026-09-01/README.md).
 
 Qualcomm's article reports maxima across several Q8 models of 2.9x TTFT and
 1.5x decode for one thread, and 2.0x/1.05x for four threads. Those measurements
@@ -305,10 +322,10 @@ The exact snapshot's QMX command repacked the full model and then terminated
 with `SIGILL` inside `libggml-cpu.so`. The phone reports base SME but not SME2,
 while that snapshot selects SME2-named Q8 kernels from its base-SME feature
 check. Therefore an exact binary-for-binary reproduction is not safe on this
-device. The newer llama.cpp/KleidiAI revision pinned by this app uses its
-base-SME-compatible path successfully, as demonstrated by the runtime evidence
-above. A fair article-style comparison must pair that corrected QMX runtime with
-a separately compiled generic-NEON runner; toggling only
+device. The llama.cpp fork pinned by this app uses Qualcomm's explicit SME1
+`qmx_mopa` and `qmx_dot` kernels successfully, as demonstrated by the runtime
+execution evidence above. A fair article-style comparison must pair that
+corrected QMX runtime with a separately compiled generic-NEON runner; toggling only
 `GGML_KLEIDIAI_SME` does not create Qualcomm's stated NEON baseline.
 
 ### Closest reproducible QMX-versus-NEON result
@@ -380,7 +397,12 @@ memory-pressure outcome. The generic-NEON baseline completed normally.
 ## Implementation notes
 
 - `lib/src/main/cpp/CMakeLists.txt` builds all Arm64 CPU variants and enables
-  `GGML_CPU_KLEIDIAI` for `arm64-v8a`.
+  `GGML_CPU_KLEIDIAI` for `arm64-v8a`. It sets CMake's
+  `FETCHCONTENT_SOURCE_DIR_KLEIDIAI_DOWNLOAD` override to the pinned
+  `third_party/kleidiai-qmx` submodule.
+- The pinned llama.cpp fork replaces its Q8 SME1 source entries with Qualcomm's
+  `qmx_mopa` and `qmx_dot` files, binds the kernel table to those exact symbols,
+  and logs their actual prefill/decode invocation once per process.
 - `MainActivity` sets `GGML_KLEIDIAI_SME` before `AiChat` loads native code.
 - `ai_chat.cpp` assigns supported tensors from the requested leading transformer
   blocks to the regular CPU buffer type, allowing CPU_KLEIDIAI repacking; other
@@ -423,7 +445,6 @@ powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1
 
 ## Third-party software and model terms
 
-`llama.cpp` is pinned as a Git submodule and retains its upstream license.
-KleidiAI is fetched by llama.cpp's CMake configuration and retains its upstream
-license. Gemma weights are downloaded separately and remain subject to their
-model-card terms.
+The llama.cpp fork and Qualcomm KleidiAI QMX are pinned as Git submodules and
+retain their respective upstream licenses. Gemma weights are downloaded
+separately and remain subject to their model-card terms.

@@ -1,0 +1,49 @@
+Device
+model=SM-S948B
+soc=SM8850
+android=16
+api=36
+cpu_features=sve sve2 svei8mm i8mm sme smei8i32 smef16f32 smeb16f32 smef32f32
+cpu_features_not_reported=sme2
+
+Pinned sources
+llama.cpp=90c5166c6248e2cab262ff155357769de3503e25
+llama.cpp_base=2e92ecd0247d25f09797f8fdb044a166522fc05d
+qualcomm_kleidiai_qmx=8316de1358b5c3589120af0f3d99477e7c16b2e7
+
+Packaged native symbols
+kai_kernel_matmul_clamp_f32_qai8dxp1vlx4_qsi8cxp4vlx4_1vlx4vl_qmx_mopa
+kai_run_matmul_clamp_f32_qai8dxp1vlx4_qsi8cxp4vlx4_1vlx4vl_qmx_mopa
+kai_kernel_matmul_clamp_f32_qai8dxp1x4_qsi8cxp4vlx4_1x4vl_qmx_dot
+kai_run_matmul_clamp_f32_qai8dxp1x4_qsi8cxp4vlx4_1x4vl_qmx_dot
+
+Gemma 3 QMX process
+kleidiai: primary q8 kernel feature SME
+kleidiai: Qualcomm QMX Q8 SME1 kernels selected (qmx_mopa + qmx_dot)
+kleidiai: SME enabled (GGML_KLEIDIAI_SME=1 debug override)
+load_tensors: CPU_KLEIDIAI model buffer size = 1084.08 MiB
+kleidiai: executing Qualcomm QMX Q8 SME1 GEMM/prefill kernel (m=128 n=2048 k=2560)
+kleidiai: executing Qualcomm QMX Q8 SME1 GEMV/decode kernel (m=1 n=2048 k=2560)
+
+Gemma 3 control process
+kleidiai: primary q8 kernel feature I8MM
+kleidiai: SME disabled
+load_tensors: CPU_KLEIDIAI model buffer size = 573.75 MiB
+
+Gemma 4 QMX process
+kleidiai: primary q8 kernel feature SME
+kleidiai: Qualcomm QMX Q8 SME1 kernels selected (qmx_mopa + qmx_dot)
+kleidiai: SME enabled (GGML_KLEIDIAI_SME=1 debug override)
+load_tensors: CPU_KLEIDIAI model buffer size = 430.27 MiB
+kleidiai: executing Qualcomm QMX Q8 SME1 GEMM/prefill kernel (m=128 n=2048 k=1536)
+kleidiai: executing Qualcomm QMX Q8 SME1 GEMV/decode kernel (m=1 n=2048 k=1536)
+
+Gemma 4 control process
+kleidiai: primary q8 kernel feature I8MM
+kleidiai: SME disabled
+load_tensors: CPU_KLEIDIAI model buffer size = 227.11 MiB
+
+APK
+path=app/build/outputs/apk/debug/app-debug.apk
+size_bytes=72168448
+sha256=AE0F9D1F9EDE8887749BB33D7A2859781538B273B73694472A2D85BB76703212
