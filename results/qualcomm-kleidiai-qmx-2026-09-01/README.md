@@ -23,7 +23,8 @@ The direct lines are retained in [`runtime-evidence.txt`](runtime-evidence.txt).
 
 ## Automatic layer-selection validation
 
-The final APK was also installed and run without a `qmx_layers` intent extra.
+The APK from app commit `05b8642c52ad4d584233a86af5e19cfb6e7fc13e`
+was also installed and run without a `qmx_layers` intent extra.
 For Gemma 4 E2B Q8_0, the app measured a two-block 138.90 MiB QMX probe and,
 from 6,993 MiB of available memory at launch, selected 8 of 35 blocks. It
 purged the unloaded probe allocation, reloaded a 569.17 MiB

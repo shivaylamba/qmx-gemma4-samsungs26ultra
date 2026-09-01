@@ -12,7 +12,8 @@ import android.util.Log
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.Button
-import android.widget.ScrollView
+import android.widget.ImageButton
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,6 +22,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.arm.aichat.AiChat
 import com.arm.aichat.InferenceEngine
 import com.arm.aichat.gguf.GgufMetadataReader
@@ -37,18 +40,21 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.math.max
-import kotlin.math.roundToInt
 
 class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var qmxBadge: TextView
     private lateinit var modelText: TextView
-    private lateinit var transcriptText: TextView
-    private lateinit var transcriptScroll: ScrollView
+    private lateinit var runtimeDetailsText: TextView
+    private lateinit var loadingProgress: ProgressBar
+    private lateinit var chatList: RecyclerView
     private lateinit var promptInput: TextInputEditText
     private lateinit var modelButton: Button
     private lateinit var downloadModelButton: Button
-    private lateinit var sendButton: Button
+    private lateinit var sendButton: ImageButton
+
+    private val messages = mutableListOf<ChatMessage>()
+    private lateinit var chatAdapter: ChatAdapter
 
     private lateinit var engine: InferenceEngine
     private lateinit var modelDownload: HuggingFaceModelDownload
@@ -75,13 +81,18 @@ class MainActivity : AppCompatActivity() {
         statusText = findViewById(R.id.statusText)
         qmxBadge = findViewById(R.id.qmxBadge)
         modelText = findViewById(R.id.modelText)
-        transcriptText = findViewById(R.id.transcriptText)
-        transcriptScroll = findViewById(R.id.transcriptScroll)
+        runtimeDetailsText = findViewById(R.id.runtimeDetailsText)
+        loadingProgress = findViewById(R.id.loadingProgress)
+        chatList = findViewById(R.id.chatList)
         promptInput = findViewById(R.id.promptInput)
         modelButton = findViewById(R.id.modelButton)
         downloadModelButton = findViewById(R.id.downloadModelButton)
         sendButton = findViewById(R.id.sendButton)
         modelDownload = HuggingFaceModelDownload(applicationContext)
+        chatAdapter = ChatAdapter(messages)
+        chatList.layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
+        chatList.adapter = chatAdapter
+        replaceChat("Preparing private, on-device inference…")
         applySystemInsets(findViewById(R.id.root))
         modelButton.isEnabled = false
         downloadModelButton.isEnabled = false
@@ -146,6 +157,9 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     withContext(Dispatchers.Main) {
                         statusText.text = "Runtime ready · choose a model"
+                        qmxBadge.text = "MODEL NEEDED"
+                        qmxBadge.setBackgroundResource(R.drawable.badge_loading)
+                        loadingProgress.visibility = View.GONE
                         modelButton.isEnabled = true
                         downloadModelButton.isEnabled = true
                     }
@@ -157,6 +171,9 @@ class MainActivity : AppCompatActivity() {
             } else {
                 withContext(Dispatchers.Main) {
                     statusText.text = "Native runtime failed to start"
+                    qmxBadge.text = "RUNTIME ERROR"
+                    qmxBadge.setBackgroundResource(R.drawable.badge_fallback)
+                    loadingProgress.visibility = View.GONE
                 }
             }
         }
@@ -193,6 +210,18 @@ class MainActivity : AppCompatActivity() {
                 false
             }
         }
+        bindSuggestion(
+            R.id.suggestionQmx,
+            "What is Qualcomm Matrix Extension and how does it accelerate this model?",
+        )
+        bindSuggestion(
+            R.id.suggestionModel,
+            "Explain the model running on this phone and its quantization.",
+        )
+        bindSuggestion(
+            R.id.suggestionPrivate,
+            "Why is private on-device AI useful?",
+        )
         findViewById<Button>(R.id.clearButton).setOnClickListener {
             if (!modelReady || generationJob?.isActive == true) return@setOnClickListener
             setControlsEnabled(false)
@@ -200,7 +229,7 @@ class MainActivity : AppCompatActivity() {
             generationJob = lifecycleScope.launch {
                 runCatching { engine.resetConversation() }
                     .onSuccess {
-                        transcriptText.text = "Conversation cleared. Ask a new question."
+                        replaceChat("Conversation cleared. Ask a new question.")
                         hasConversation = false
                         showAccelerationStatus()
                     }
@@ -215,6 +244,7 @@ class MainActivity : AppCompatActivity() {
     private fun importAndLoadModel(uri: Uri) {
         modelReady = false
         setControlsEnabled(false)
+        loadingProgress.visibility = View.VISIBLE
         val displayName = queryDisplayName(uri)
         if (!displayName.endsWith(".gguf", ignoreCase = true)) {
             showError("Please choose a GGUF model file.")
@@ -259,8 +289,10 @@ class MainActivity : AppCompatActivity() {
         runCatching { modelDownload.enqueue() }
             .onSuccess {
                 modelText.text = HuggingFaceModelDownload.MODEL_FILENAME
-                transcriptText.text =
-                    "Downloading Gemma from Hugging Face. You can leave the app; Android will continue the transfer."
+                replaceChat(
+                    "Downloading Gemma from Hugging Face. You can leave the app; " +
+                        "Android will continue the transfer.",
+                )
                 refreshDownloadButton()
                 monitorModelDownload()
             }
@@ -270,6 +302,7 @@ class MainActivity : AppCompatActivity() {
     private fun cancelModelDownload() {
         modelDownload.cancel()
         downloadMonitorJob?.cancel()
+        loadingProgress.visibility = View.GONE
         statusText.text = if (modelReady) engine.accelerationInfo() else "Model download cancelled"
         if (!modelReady) modelText.text = "No model selected"
         refreshDownloadButton()
@@ -306,6 +339,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showDownloadProgress(state: HuggingFaceModelDownload.State.Active) {
+        loadingProgress.visibility = View.VISIBLE
         val total = state.totalBytes.takeIf { it > 0 } ?: HuggingFaceModelDownload.MODEL_SIZE_BYTES
         val percent = ((state.downloadedBytes * 100) / total).coerceIn(0, 100)
         val phase = when (state.status) {
@@ -332,6 +366,7 @@ class MainActivity : AppCompatActivity() {
         if (runtimeReady && !modelReady) {
             withContext(Dispatchers.IO) { loadModelFile(modelDownload.destinationFile) }
         } else {
+            loadingProgress.visibility = View.GONE
             statusText.text = if (modelReady) engine.accelerationInfo() else "Model downloaded and verified"
             Toast.makeText(this, "Gemma model downloaded and verified", Toast.LENGTH_LONG).show()
         }
@@ -357,6 +392,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadVerifiedDownloadedModel() {
         if (!runtimeReady || modelReady) return
+        loadingProgress.visibility = View.VISIBLE
         lifecycleScope.launch(Dispatchers.IO) {
             runCatching {
                 verifiedDownloadedModel()?.let { loadModelFile(it) }
@@ -390,6 +426,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showDownloadError(message: String) {
+        loadingProgress.visibility = View.GONE
         statusText.text = if (modelReady) engine.accelerationInfo() else "Model download failed"
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         refreshDownloadButton()
@@ -411,7 +448,9 @@ class MainActivity : AppCompatActivity() {
         withContext(Dispatchers.Main) {
             showAccelerationStatus()
             modelText.text = "${modelFile.name} · ${formatBytes(modelFile.length())}"
-            transcriptText.text = "Gemma is ready. Ask anything — inference is fully offline."
+            replaceChat(
+                "Gemma is ready. Ask anything. Inference and conversation history stay on this phone.",
+            )
             hasConversation = false
             setControlsEnabled(true)
         }
@@ -482,7 +521,7 @@ class MainActivity : AppCompatActivity() {
         )
         Log.i(TAG, "QMX_BENCH_RESULT sme=$sme threads=$threads runs=$runs\n$result")
         withContext(Dispatchers.Main) {
-            transcriptText.text = result
+            replaceChat(result)
             statusText.text = "Benchmark complete · SME=$sme · $threads thread(s)"
         }
     }
@@ -535,31 +574,71 @@ class MainActivity : AppCompatActivity() {
         if (prompt.isEmpty()) return
 
         promptInput.text?.clear()
-        if (!hasConversation) transcriptText.text = ""
+        if (!hasConversation) clearChat()
         hasConversation = true
-        transcriptText.append("\n\nYou\n$prompt\n\nGemma\n")
-        scrollTranscript()
+        addMessage(ChatMessage(prompt, isUser = true))
+        val assistantIndex = addMessage(ChatMessage("Thinking…", isUser = false))
         setControlsEnabled(false)
         sendButton.isEnabled = true
-        sendButton.text = getString(R.string.stop)
+        sendButton.setImageResource(R.drawable.ic_stop)
+        sendButton.contentDescription = getString(R.string.stop)
         statusText.text = "Generating on device…"
 
+        val response = StringBuilder()
         generationJob = lifecycleScope.launch {
             runCatching {
                 engine.sendUserPrompt(prompt, predictLength = 256).collect { token ->
-                    transcriptText.append(token)
-                    scrollTranscript()
+                    response.append(token)
+                    messages[assistantIndex].text = response.toString()
+                    chatAdapter.notifyItemChanged(assistantIndex)
+                    scrollChat()
                 }
             }.onFailure { error ->
-                if (error !is kotlinx.coroutines.CancellationException) {
-                    transcriptText.append("\n\n[Error: ${error.message}]")
+                if (error is kotlinx.coroutines.CancellationException && response.isEmpty()) {
+                    messages[assistantIndex].text = "Generation stopped."
+                    chatAdapter.notifyItemChanged(assistantIndex)
+                } else if (error !is kotlinx.coroutines.CancellationException) {
+                    messages[assistantIndex].text = "Error: ${error.message}"
+                    chatAdapter.notifyItemChanged(assistantIndex)
                     Log.e(TAG, "Generation failed", error)
                 }
             }
             showAccelerationStatus()
-            sendButton.text = getString(R.string.send)
+            sendButton.setImageResource(R.drawable.ic_send)
+            sendButton.contentDescription = getString(R.string.send)
             setControlsEnabled(true)
         }
+    }
+
+    private fun bindSuggestion(viewId: Int, prompt: String) {
+        findViewById<TextView>(viewId).setOnClickListener {
+            promptInput.setText(prompt)
+            promptInput.setSelection(prompt.length)
+            if (modelReady && generationJob?.isActive != true) sendPrompt()
+        }
+    }
+
+    private fun addMessage(message: ChatMessage): Int {
+        val index = messages.size
+        messages.add(message)
+        chatAdapter.notifyItemInserted(index)
+        scrollChat()
+        return index
+    }
+
+    private fun replaceChat(message: String) {
+        val previousCount = messages.size
+        messages.clear()
+        if (previousCount > 0) chatAdapter.notifyItemRangeRemoved(0, previousCount)
+        messages.add(ChatMessage(message, isUser = false))
+        chatAdapter.notifyItemInserted(0)
+        scrollChat()
+    }
+
+    private fun clearChat() {
+        val count = messages.size
+        messages.clear()
+        if (count > 0) chatAdapter.notifyItemRangeRemoved(0, count)
     }
 
     private fun setControlsEnabled(enabled: Boolean) {
@@ -584,22 +663,21 @@ class MainActivity : AppCompatActivity() {
         return name
     }
 
-    private fun scrollTranscript() = transcriptScroll.post {
-        transcriptScroll.fullScroll(ScrollView.FOCUS_DOWN)
+    private fun scrollChat() = chatList.post {
+        if (messages.isNotEmpty()) chatList.scrollToPosition(messages.lastIndex)
     }
 
     private fun applySystemInsets(root: View) {
-        val horizontal = (20 * resources.displayMetrics.density).roundToInt()
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, windowInsets ->
             val bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
             val ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime())
             view.setPadding(
-                horizontal + bars.left,
+                bars.left,
                 bars.top,
-                horizontal + bars.right,
+                bars.right,
                 max(bars.bottom, ime.bottom),
             )
-            if (ime.bottom > 0) scrollTranscript()
+            if (ime.bottom > 0) scrollChat()
             windowInsets
         }
         ViewCompat.requestApplyInsets(root)
@@ -607,12 +685,27 @@ class MainActivity : AppCompatActivity() {
 
     private fun showAccelerationStatus() {
         val acceleration = engine.accelerationInfo()
-        qmxBadge.text = if (acceleration.startsWith("QMX active")) "QMX ACTIVE" else "CPU FALLBACK"
+        val stats = engine.qmxRuntimeStats()
+        val active = acceleration.startsWith("QMX active")
+        qmxBadge.text = if (active) "QMX ACTIVE" else "CPU FALLBACK"
+        qmxBadge.setBackgroundResource(if (active) R.drawable.badge_active else R.drawable.badge_fallback)
         statusText.text = acceleration
+        runtimeDetailsText.text = if (active && stats.totalLayers > 0) {
+            "${stats.selectedLayers}/${stats.totalLayers} blocks\n${"%.0f".format(stats.bufferMiB)} MiB"
+        } else {
+            "CPU PATH"
+        }
+        runtimeDetailsText.setTextColor(
+            getColor(if (active) R.color.positive else R.color.negative),
+        )
+        loadingProgress.visibility = View.GONE
     }
 
     private fun showError(message: String) {
         statusText.text = "Model not loaded"
+        qmxBadge.text = "LOAD FAILED"
+        qmxBadge.setBackgroundResource(R.drawable.badge_fallback)
+        loadingProgress.visibility = View.GONE
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         modelButton.isEnabled = true
         downloadModelButton.isEnabled = true

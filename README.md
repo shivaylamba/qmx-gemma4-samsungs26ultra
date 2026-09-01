@@ -25,7 +25,11 @@ so the tested QMX dispatch is SME1. The app has:
 - model-aware, live-memory-aware selection of QMX-repacked transformer blocks;
 - automatic reload of the most recently imported or downloaded GGUF.
 
-![Two-turn on-device chat](qmx-multiturn.png)
+The interface uses a compact dark runtime dashboard, real QMX status and buffer
+measurements, streamed user and assistant message bubbles, prompt suggestions,
+and an IME-safe composer that remains visible above the keyboard. Displayed
+acceleration values come from the native runtime; the UI does not show estimated
+or hard-coded token speeds.
 
 For a source-level comparison with Kartikey's QMX-CPU sample, including why a
 270M model does not need the same layer planner as a 4B Android app, see

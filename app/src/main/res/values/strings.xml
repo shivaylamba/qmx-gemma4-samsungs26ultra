@@ -1,14 +1,19 @@
 <resources>
     <string name="app_name">QMX Gemma</string>
-    <string name="headline">Gemma 4 E2B</string>
-    <string name="subhead">Private, on-device text generation</string>
-    <string name="qmx_requested">QMX · SME requested</string>
-    <string name="choose_model">Choose model</string>
-    <string name="download_model">Download model</string>
+    <string name="headline">QMX AI Studio</string>
+    <string name="model_initializing">Gemma runtime is initializing</string>
+    <string name="initializing">INITIALIZING</string>
+    <string name="runtime_starting">Starting native CPU runtime</string>
+    <string name="cpu_sme">CPU · SME1</string>
+    <string name="choose_model">Choose</string>
+    <string name="download_model">Download</string>
     <string name="cancel_download">Cancel download</string>
-    <string name="model_downloaded">Model downloaded</string>
+    <string name="model_downloaded">Downloaded</string>
     <string name="send">Send</string>
     <string name="stop">Stop</string>
     <string name="clear">Clear</string>
-    <string name="prompt_hint">Ask Gemma something…</string>
+    <string name="prompt_hint">Ask Gemma privately on this phone</string>
+    <string name="suggestion_qmx">What is QMX?</string>
+    <string name="suggestion_model">Explain this model</string>
+    <string name="suggestion_private">Why on-device AI?</string>
 </resources>

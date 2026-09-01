@@ -53,7 +53,8 @@ QMX_AUTO_RESULT QmxRuntimeStats(active=true, bufferMiB=569.17, selectedLayers=8,
 kleidiai: executing Qualcomm QMX Q8 SME1 GEMM/prefill kernel (m=128 n=2048 k=1536)
 kleidiai: executing Qualcomm QMX Q8 SME1 GEMV/decode kernel (m=1 n=2048 k=1536)
 
-APK
+Validated APK for this evidence
+app_commit=05b8642c52ad4d584233a86af5e19cfb6e7fc13e
 path=app/build/outputs/apk/debug/app-debug.apk
 size_bytes=91347934
 sha256=2948A9CBEF13821E51E6D2F6533EFAC4D2E668D72586EB27E3ED438664F257B7

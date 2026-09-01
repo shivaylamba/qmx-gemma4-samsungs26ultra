@@ -1,166 +1,260 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/surface"
     android:orientation="vertical">
 
     <LinearLayout
+        android:id="@+id/runtimeHeader"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
+        android:background="@drawable/header_panel"
+        android:elevation="6dp"
+        android:orientation="vertical"
+        android:paddingHorizontal="18dp"
+        android:paddingTop="14dp"
+        android:paddingBottom="12dp">
 
         <LinearLayout
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical">
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-medium"
+                    android:text="@string/headline"
+                    android:textColor="@color/ink"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/modelText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:ellipsize="middle"
+                    android:maxLines="1"
+                    android:text="@string/model_initializing"
+                    android:textColor="@color/muted"
+                    android:textSize="12sp" />
+            </LinearLayout>
 
             <TextView
+                android:id="@+id/qmxBadge"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/headline"
-                android:textColor="@color/ink"
-                android:textSize="28sp"
+                android:layout_marginStart="12dp"
+                android:background="@drawable/badge_loading"
+                android:fontFamily="sans-serif-medium"
+                android:paddingHorizontal="11dp"
+                android:paddingVertical="6dp"
+                android:text="@string/initializing"
+                android:textColor="@color/white"
+                android:textSize="11sp"
                 android:textStyle="bold" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/subhead"
-                android:textColor="@color/muted"
-                android:textSize="14sp" />
         </LinearLayout>
 
-        <TextView
-            android:id="@+id/qmxBadge"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:background="@drawable/status_pill"
-            android:text="@string/qmx_requested"
-            android:textColor="@color/accent"
-            android:textSize="12sp"
-            android:textStyle="bold" />
-    </LinearLayout>
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="18dp"
-        android:background="@drawable/panel"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:padding="14dp">
-
         <LinearLayout
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical">
+            android:layout_marginTop="10dp"
+            android:background="@drawable/hardware_panel"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="8dp">
 
             <TextView
                 android:id="@+id/statusText"
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:text="Native runtime is starting…"
-                android:textColor="@color/ink"
-                android:textStyle="bold" />
+                android:layout_weight="1"
+                android:fontFamily="monospace"
+                android:maxLines="2"
+                android:text="@string/runtime_starting"
+                android:textColor="@color/accent"
+                android:textSize="11sp" />
 
             <TextView
-                android:id="@+id/modelText"
-                android:layout_width="match_parent"
+                android:id="@+id/runtimeDetailsText"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="3dp"
-                android:ellipsize="middle"
-                android:maxLines="1"
-                android:text="No model selected"
-                android:textColor="@color/muted"
-                android:textSize="12sp" />
+                android:layout_marginStart="10dp"
+                android:fontFamily="monospace"
+                android:text="@string/cpu_sme"
+                android:textColor="@color/positive"
+                android:textSize="11sp"
+                android:textStyle="bold" />
         </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/loadingProgress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="3dp"
+            android:layout_marginTop="7dp"
+            android:indeterminate="true"
+            android:indeterminateTint="@color/accent" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="end"
+            android:orientation="horizontal">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/downloadModelButton"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:enabled="false"
+                android:minHeight="0dp"
+                android:text="@string/download_model"
+                android:textColor="@color/accent"
+                android:textSize="11sp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/modelButton"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:enabled="false"
+                android:minHeight="0dp"
+                android:text="@string/choose_model"
+                android:textColor="@color/accent"
+                android:textSize="11sp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/clearButton"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:minHeight="0dp"
+                android:text="@string/clear"
+                android:textColor="@color/muted"
+                android:textSize="11sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/chatList"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="14dp"
+        android:paddingBottom="10dp" />
+
+    <HorizontalScrollView
+        android:id="@+id/suggestionScroll"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:clipToPadding="false"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="6dp"
+        android:scrollbars="none">
 
         <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:gravity="end"
-            android:orientation="vertical">
+            android:orientation="horizontal">
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/downloadModelButton"
+            <TextView
+                android:id="@+id/suggestionQmx"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/download_model" />
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/suggestion_chip"
+                android:clickable="true"
+                android:focusable="true"
+                android:paddingHorizontal="13dp"
+                android:paddingVertical="8dp"
+                android:text="@string/suggestion_qmx"
+                android:textColor="@color/ink"
+                android:textSize="12sp" />
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/modelButton"
-                style="@style/Widget.Material3.Button.TonalButton"
+            <TextView
+                android:id="@+id/suggestionModel"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="@string/choose_model" />
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/suggestion_chip"
+                android:clickable="true"
+                android:focusable="true"
+                android:paddingHorizontal="13dp"
+                android:paddingVertical="8dp"
+                android:text="@string/suggestion_model"
+                android:textColor="@color/ink"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/suggestionPrivate"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/suggestion_chip"
+                android:clickable="true"
+                android:focusable="true"
+                android:paddingHorizontal="13dp"
+                android:paddingVertical="8dp"
+                android:text="@string/suggestion_private"
+                android:textColor="@color/ink"
+                android:textSize="12sp" />
         </LinearLayout>
-    </LinearLayout>
-
-    <ScrollView
-        android:id="@+id/transcriptScroll"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_marginTop="14dp"
-        android:layout_weight="1"
-        android:background="@drawable/panel"
-        android:fillViewport="true"
-        android:padding="18dp">
-
-        <TextView
-            android:id="@+id/transcriptText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:lineSpacingExtra="4dp"
-            android:text="Choose the Gemma 4 E2B Q8_0 GGUF model to begin.\n\nEverything stays on this phone."
-            android:textColor="@color/ink"
-            android:textIsSelectable="true"
-            android:textSize="16sp" />
-    </ScrollView>
+    </HorizontalScrollView>
 
     <LinearLayout
+        android:id="@+id/composer"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:gravity="bottom"
-        android:orientation="horizontal">
+        android:background="@color/surface_raised"
+        android:elevation="12dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="14dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="12dp">
 
-        <com.google.android.material.textfield.TextInputLayout
-            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/promptInput"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:hint="@string/prompt_hint">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/promptInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:enabled="false"
-                android:imeOptions="actionSend"
-                android:inputType="textCapSentences|textMultiLine"
-                android:maxLines="4" />
-        </com.google.android.material.textfield.TextInputLayout>
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/sendButton"
-            android:layout_width="wrap_content"
-            android:layout_height="56dp"
-            android:layout_marginStart="8dp"
+            android:background="@drawable/input_box"
             android:enabled="false"
-            android:text="@string/send" />
-    </LinearLayout>
+            android:hint="@string/prompt_hint"
+            android:imeOptions="actionSend"
+            android:inputType="textCapSentences|textMultiLine"
+            android:maxLines="4"
+            android:minHeight="50dp"
+            android:paddingHorizontal="17dp"
+            android:paddingVertical="12dp"
+            android:textColor="@color/ink"
+            android:textColorHint="@color/muted"
+            android:textSize="14sp" />
 
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/clearButton"
-        style="@style/Widget.Material3.Button.TextButton"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="end"
-        android:text="@string/clear" />
+        <ImageButton
+            android:id="@+id/sendButton"
+            android:layout_width="50dp"
+            android:layout_height="50dp"
+            android:layout_marginStart="10dp"
+            android:background="@drawable/send_button"
+            android:contentDescription="@string/send"
+            android:enabled="false"
+            android:padding="14dp"
+            android:src="@drawable/ic_send"
+            app:tint="@color/white" />
+    </LinearLayout>
 </LinearLayout>

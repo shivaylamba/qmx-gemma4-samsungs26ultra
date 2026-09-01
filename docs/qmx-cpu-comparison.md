@@ -24,6 +24,7 @@ This comparison was made against Kartikey's
 | Runtime proof | UI reports QMX after native initialization | Requires SME selection, a `CPU_KLEIDIAI` model buffer, and logs actual QMX GEMM and GEMV invocation |
 | Native libraries | Includes prebuilt shared libraries | Builds the application libraries from pinned source revisions |
 | Chat behavior | Re-formats individual prompts | Preserves multi-turn chat state in the model context |
+| UI status | Uses a polished dark dashboard, but includes estimated speed text and treats successful initialization as QMX active | Adapts the dashboard, bubbles, suggestions, and floating composer while showing only runtime-observed QMX status, selected blocks, and buffer size |
 
 The QMX-CPU approach is reasonable for a 270M model because all supported
 weights can normally be repacked without approaching the phone's memory limit.
@@ -54,3 +55,20 @@ and unsupported tensors continue on other CPU kernels.
 All llama.cpp integration changes are stored under `patches/` in this
 repository and applied by `scripts/setup.ps1`. No llama.cpp pull request or
 separate application-specific llama.cpp fork is required.
+
+## UI patterns incorporated
+
+The application adopts the strongest presentation ideas from QMX-CPU without
+changing inference ownership:
+
+- a compact dark hardware and model dashboard;
+- a visible QMX status badge backed by native observations;
+- separate streamed user and assistant bubbles;
+- horizontally scrollable prompt suggestions;
+- a fixed composer with send and stop states;
+- model download, model import, and conversation clearing retained in the
+  dashboard header.
+
+Hard-coded throughput labels were intentionally not carried over. Thread-count
+experiments remain explicit benchmark inputs rather than a cosmetic toggle that
+silently reloads the chat model.
