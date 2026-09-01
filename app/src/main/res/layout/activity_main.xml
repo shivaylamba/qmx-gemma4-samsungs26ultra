@@ -4,22 +4,108 @@
     android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/surface"
     android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="20dp"
+        android:paddingTop="18dp"
+        android:paddingEnd="20dp"
+        android:paddingBottom="12dp">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-medium"
+                android:text="@string/headline"
+                android:textColor="@color/ink"
+                android:textSize="25sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="@string/subhead"
+                android:textColor="@color/muted"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/qmxBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:background="@drawable/badge_loading"
+            android:fontFamily="sans-serif-medium"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="7dp"
+            android:text="@string/initializing"
+            android:textColor="@color/white"
+            android:textSize="10sp"
+            android:textStyle="bold" />
+    </LinearLayout>
 
     <LinearLayout
         android:id="@+id/runtimeHeader"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@drawable/header_panel"
-        android:elevation="6dp"
+        android:layout_marginHorizontal="16dp"
+        android:background="@drawable/runtime_card"
+        android:elevation="1dp"
         android:orientation="vertical"
-        android:paddingHorizontal="18dp"
-        android:paddingTop="14dp"
-        android:paddingBottom="12dp">
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.12"
+            android:text="@string/runtime_label"
+            android:textColor="@color/accent"
+            android:textSize="10sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="7dp"
+            android:maxLines="2"
+            android:text="@string/runtime_starting"
+            android:textColor="@color/ink"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <ProgressBar
+            android:id="@+id/loadingProgress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="3dp"
+            android:layout_marginTop="10dp"
+            android:indeterminate="true"
+            android:indeterminateTint="@color/accent" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="11dp"
+            android:background="@color/border" />
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="11dp"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
@@ -32,11 +118,9 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:fontFamily="sans-serif-medium"
-                    android:text="@string/headline"
-                    android:textColor="@color/ink"
-                    android:textSize="20sp"
-                    android:textStyle="bold" />
+                    android:text="@string/model_label"
+                    android:textColor="@color/muted"
+                    android:textSize="10sp" />
 
                 <TextView
                     android:id="@+id/modelText"
@@ -46,106 +130,88 @@
                     android:ellipsize="middle"
                     android:maxLines="1"
                     android:text="@string/model_initializing"
-                    android:textColor="@color/muted"
+                    android:textColor="@color/ink"
                     android:textSize="12sp" />
             </LinearLayout>
-
-            <TextView
-                android:id="@+id/qmxBadge"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
-                android:background="@drawable/badge_loading"
-                android:fontFamily="sans-serif-medium"
-                android:paddingHorizontal="11dp"
-                android:paddingVertical="6dp"
-                android:text="@string/initializing"
-                android:textColor="@color/white"
-                android:textSize="11sp"
-                android:textStyle="bold" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:background="@drawable/hardware_panel"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingHorizontal="12dp"
-            android:paddingVertical="8dp">
-
-            <TextView
-                android:id="@+id/statusText"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:fontFamily="monospace"
-                android:maxLines="2"
-                android:text="@string/runtime_starting"
-                android:textColor="@color/accent"
-                android:textSize="11sp" />
 
             <TextView
                 android:id="@+id/runtimeDetailsText"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="10dp"
-                android:fontFamily="monospace"
+                android:layout_marginStart="12dp"
+                android:background="@drawable/runtime_detail_pill"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:minWidth="92dp"
+                android:paddingHorizontal="10dp"
+                android:paddingVertical="7dp"
                 android:text="@string/cpu_sme"
                 android:textColor="@color/positive"
-                android:textSize="11sp"
+                android:textSize="10sp"
                 android:textStyle="bold" />
         </LinearLayout>
-
-        <ProgressBar
-            android:id="@+id/loadingProgress"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="3dp"
-            android:layout_marginTop="7dp"
-            android:indeterminate="true"
-            android:indeterminateTint="@color/accent" />
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="12dp"
             android:gravity="end"
             android:orientation="horizontal">
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/downloadModelButton"
-                style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
-                android:layout_height="40dp"
+                android:layout_height="42dp"
                 android:enabled="false"
                 android:minHeight="0dp"
                 android:text="@string/download_model"
-                android:textColor="@color/accent"
-                android:textSize="11sp" />
+                android:textSize="11sp"
+                app:cornerRadius="12dp" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/modelButton"
-                style="@style/Widget.Material3.Button.TextButton"
+                style="@style/Widget.Material3.Button.TonalButton"
                 android:layout_width="wrap_content"
-                android:layout_height="40dp"
+                android:layout_height="42dp"
+                android:layout_marginStart="8dp"
                 android:enabled="false"
                 android:minHeight="0dp"
                 android:text="@string/choose_model"
-                android:textColor="@color/accent"
-                android:textSize="11sp" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/clearButton"
-                style="@style/Widget.Material3.Button.TextButton"
-                android:layout_width="wrap_content"
-                android:layout_height="40dp"
-                android:minHeight="0dp"
-                android:text="@string/clear"
-                android:textColor="@color/muted"
-                android:textSize="11sp" />
+                android:textSize="11sp"
+                app:cornerRadius="12dp" />
         </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="20dp"
+        android:paddingTop="16dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="6dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.12"
+            android:text="@string/conversation_label"
+            android:textColor="@color/muted"
+            android:textSize="10sp"
+            android:textStyle="bold" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/clearButton"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:minHeight="0dp"
+            android:text="@string/clear"
+            android:textColor="@color/muted"
+            android:textSize="11sp" />
     </LinearLayout>
 
     <androidx.recyclerview.widget.RecyclerView
@@ -155,105 +221,51 @@
         android:layout_weight="1"
         android:clipToPadding="false"
         android:paddingHorizontal="16dp"
-        android:paddingTop="14dp"
-        android:paddingBottom="10dp" />
-
-    <HorizontalScrollView
-        android:id="@+id/suggestionScroll"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:clipToPadding="false"
-        android:paddingHorizontal="16dp"
-        android:paddingVertical="6dp"
-        android:scrollbars="none">
-
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-
-            <TextView
-                android:id="@+id/suggestionQmx"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="8dp"
-                android:background="@drawable/suggestion_chip"
-                android:clickable="true"
-                android:focusable="true"
-                android:paddingHorizontal="13dp"
-                android:paddingVertical="8dp"
-                android:text="@string/suggestion_qmx"
-                android:textColor="@color/ink"
-                android:textSize="12sp" />
-
-            <TextView
-                android:id="@+id/suggestionModel"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="8dp"
-                android:background="@drawable/suggestion_chip"
-                android:clickable="true"
-                android:focusable="true"
-                android:paddingHorizontal="13dp"
-                android:paddingVertical="8dp"
-                android:text="@string/suggestion_model"
-                android:textColor="@color/ink"
-                android:textSize="12sp" />
-
-            <TextView
-                android:id="@+id/suggestionPrivate"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:background="@drawable/suggestion_chip"
-                android:clickable="true"
-                android:focusable="true"
-                android:paddingHorizontal="13dp"
-                android:paddingVertical="8dp"
-                android:text="@string/suggestion_private"
-                android:textColor="@color/ink"
-                android:textSize="12sp" />
-        </LinearLayout>
-    </HorizontalScrollView>
+        android:paddingTop="2dp"
+        android:paddingBottom="14dp" />
 
     <LinearLayout
         android:id="@+id/composer"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/surface_raised"
-        android:elevation="12dp"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="12dp"
+        android:background="@drawable/composer_card"
+        android:elevation="3dp"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingHorizontal="14dp"
-        android:paddingTop="10dp"
-        android:paddingBottom="12dp">
+        android:paddingStart="6dp"
+        android:paddingTop="5dp"
+        android:paddingEnd="6dp"
+        android:paddingBottom="5dp">
 
         <com.google.android.material.textfield.TextInputEditText
             android:id="@+id/promptInput"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:background="@drawable/input_box"
+            android:background="@android:color/transparent"
             android:enabled="false"
             android:hint="@string/prompt_hint"
             android:imeOptions="actionSend"
             android:inputType="textCapSentences|textMultiLine"
             android:maxLines="4"
-            android:minHeight="50dp"
-            android:paddingHorizontal="17dp"
-            android:paddingVertical="12dp"
+            android:minHeight="52dp"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="10dp"
             android:textColor="@color/ink"
             android:textColorHint="@color/muted"
             android:textSize="14sp" />
 
         <ImageButton
             android:id="@+id/sendButton"
-            android:layout_width="50dp"
-            android:layout_height="50dp"
-            android:layout_marginStart="10dp"
+            android:layout_width="46dp"
+            android:layout_height="46dp"
             android:background="@drawable/send_button"
             android:contentDescription="@string/send"
             android:enabled="false"
-            android:padding="14dp"
+            android:padding="12dp"
             android:src="@drawable/ic_send"
             app:tint="@color/white" />
     </LinearLayout>
