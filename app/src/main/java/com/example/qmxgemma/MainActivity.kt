@@ -54,7 +54,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var downloadModelButton: Button
     private lateinit var sendButton: ImageButton
 
-    private val messages = mutableListOf<ChatMessage>()
+    private val chatSession = ChatSessionState.process
+    private val messages: List<ChatMessage>
+        get() = chatSession.messages
     private lateinit var chatAdapter: ChatAdapter
 
     private lateinit var engine: InferenceEngine
@@ -64,7 +66,7 @@ class MainActivity : AppCompatActivity() {
     private val modelLoadMutex = Mutex()
     @Volatile
     private var modelReady = false
-    private var hasConversation = false
+    private var hadRetainedConversation = false
     private var benchmarkStarted = false
     @Volatile
     private var runtimeReady = false
@@ -96,6 +98,7 @@ class MainActivity : AppCompatActivity() {
         downloadModelButton = findViewById(R.id.downloadModelButton)
         sendButton = findViewById(R.id.sendButton)
         modelDownload = HuggingFaceModelDownload(applicationContext)
+        hadRetainedConversation = chatSession.hasConversation && messages.isNotEmpty()
         chatAdapter = ChatAdapter(messages)
         chatList.layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
         chatList.adapter = chatAdapter
@@ -113,7 +116,11 @@ class MainActivity : AppCompatActivity() {
                 if (userDragging) autoFollowResponse = isChatNearBottom()
             }
         })
-        replaceChat("Preparing private, on-device inference…")
+        if (hadRetainedConversation) {
+            scrollChat(force = true)
+        } else {
+            replaceChat("Preparing private, on-device inference…")
+        }
         applySystemInsets(findViewById(R.id.root))
         modelButton.isEnabled = false
         downloadModelButton.isEnabled = false
@@ -242,7 +249,7 @@ class MainActivity : AppCompatActivity() {
                 runCatching { engine.resetConversation() }
                     .onSuccess {
                         replaceChat("Conversation cleared. Ask a new question.")
-                        hasConversation = false
+                        chatSession.markConversationCleared()
                         showAccelerationStatus()
                     }
                     .onFailure { error ->
@@ -464,7 +471,7 @@ class MainActivity : AppCompatActivity() {
             replaceChat(
                 "Gemma is ready. Ask anything. Inference and conversation history stay on this phone.",
             )
-            hasConversation = false
+            chatSession.markConversationCleared()
             setControlsEnabled(true)
         }
         runRequestedBenchmark()
@@ -477,10 +484,14 @@ class MainActivity : AppCompatActivity() {
             showAccelerationStatus()
             modelText.text = modelFile?.let { "${it.name} · ${formatBytes(it.length())}" }
                 ?: "Model already loaded in this process"
-            replaceChat(
-                "Gemma is ready. The process-scoped model remained loaded while the screen was recreated.",
-            )
-            hasConversation = false
+            if (!hadRetainedConversation) {
+                replaceChat(
+                    "Gemma is ready. The process-scoped model remained loaded while the screen was recreated.",
+                )
+                chatSession.markConversationCleared()
+            } else {
+                scrollChat(force = true)
+            }
             setControlsEnabled(true)
             refreshDownloadButton()
             monitorModelDownload()
@@ -605,8 +616,8 @@ class MainActivity : AppCompatActivity() {
         if (prompt.isEmpty()) return
 
         promptInput.text?.clear()
-        if (!hasConversation) clearChat()
-        hasConversation = true
+        if (!chatSession.hasConversation) clearChat()
+        chatSession.beginConversation()
         addMessage(ChatMessage(prompt, isUser = true))
         val assistantIndex = addMessage(ChatMessage("Preparing a response…", isUser = false))
         autoFollowResponse = true
@@ -651,8 +662,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun addMessage(message: ChatMessage): Int {
-        val index = messages.size
-        messages.add(message)
+        val index = chatSession.append(message)
         chatAdapter.notifyItemInserted(index)
         scrollChat(force = true)
         return index
@@ -664,17 +674,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun replaceChat(message: String) {
-        val previousCount = messages.size
-        messages.clear()
+        val previousCount = chatSession.replaceWith(ChatMessage(message, isUser = false))
         if (previousCount > 0) chatAdapter.notifyItemRangeRemoved(0, previousCount)
-        messages.add(ChatMessage(message, isUser = false))
         chatAdapter.notifyItemInserted(0)
         scrollChat(force = true)
     }
 
     private fun clearChat() {
-        val count = messages.size
-        messages.clear()
+        val count = chatSession.clear()
         if (count > 0) chatAdapter.notifyItemRangeRemoved(0, count)
     }
 
