@@ -1,19 +1,22 @@
 <resources>
     <string name="app_name">QMX Gemma</string>
-    <string name="headline">QMX AI Studio</string>
+    <string name="headline">Gemma Local</string>
+    <string name="subhead">A private conversation on your CPU</string>
+    <string name="runtime_label">ON-DEVICE RUNTIME</string>
+    <string name="conversation_label">CONVERSATION</string>
+    <string name="model_label">MODEL</string>
+    <string name="assistant_label">GEMMA</string>
+    <string name="user_label">YOU</string>
     <string name="model_initializing">Gemma runtime is initializing</string>
-    <string name="initializing">INITIALIZING</string>
-    <string name="runtime_starting">Starting native CPU runtime</string>
+    <string name="initializing">STARTING</string>
+    <string name="runtime_starting">Starting the native CPU runtime</string>
     <string name="cpu_sme">CPU · SME1</string>
-    <string name="choose_model">Choose</string>
-    <string name="download_model">Download</string>
+    <string name="choose_model">Choose model</string>
+    <string name="download_model">Download model</string>
     <string name="cancel_download">Cancel download</string>
     <string name="model_downloaded">Downloaded</string>
     <string name="send">Send</string>
     <string name="stop">Stop</string>
-    <string name="clear">Clear</string>
-    <string name="prompt_hint">Ask Gemma privately on this phone</string>
-    <string name="suggestion_qmx">What is QMX?</string>
-    <string name="suggestion_model">Explain this model</string>
-    <string name="suggestion_private">Why on-device AI?</string>
+    <string name="clear">New chat</string>
+    <string name="prompt_hint">Message Gemma on this phone</string>
 </resources>

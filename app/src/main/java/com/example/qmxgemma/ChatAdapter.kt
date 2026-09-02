@@ -9,7 +9,13 @@ import androidx.recyclerview.widget.RecyclerView
 internal class ChatAdapter(
     private val messages: List<ChatMessage>,
 ) : RecyclerView.Adapter<ChatAdapter.MessageViewHolder>() {
+    init {
+        setHasStableIds(true)
+    }
+
     override fun getItemViewType(position: Int): Int = if (messages[position].isUser) USER else ASSISTANT
+
+    override fun getItemId(position: Int): Long = messages[position].id
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): MessageViewHolder {
         val layout = if (viewType == USER) {
@@ -26,6 +32,24 @@ internal class ChatAdapter(
         holder.messageText.text = messages[position].text
     }
 
+    override fun onBindViewHolder(
+        holder: MessageViewHolder,
+        position: Int,
+        payloads: MutableList<Any>,
+    ) {
+        if (payloads.contains(TEXT_CHANGED)) {
+            holder.messageText.text = messages[position].text
+        } else {
+            super.onBindViewHolder(holder, position, payloads)
+        }
+    }
+
+    fun updateText(position: Int, text: String) {
+        if (position !in messages.indices || messages[position].text == text) return
+        messages[position].text = text
+        notifyItemChanged(position, TEXT_CHANGED)
+    }
+
     override fun getItemCount(): Int = messages.size
 
     class MessageViewHolder(itemView: View, textId: Int) : RecyclerView.ViewHolder(itemView) {
@@ -35,5 +59,6 @@ internal class ChatAdapter(
     private companion object {
         const val USER = 1
         const val ASSISTANT = 2
+        const val TEXT_CHANGED = "text_changed"
     }
 }

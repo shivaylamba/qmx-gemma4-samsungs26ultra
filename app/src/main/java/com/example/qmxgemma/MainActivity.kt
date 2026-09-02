@@ -6,6 +6,7 @@ import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
 import android.os.StatFs
+import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.system.Os
 import android.util.Log
@@ -69,6 +70,12 @@ class MainActivity : AppCompatActivity() {
     private var runtimeReady = false
     private var qmxMode = "1"
     private var explicitQmxLayers: Int? = null
+    private var autoFollowResponse = true
+    private val scrollToBottom = Runnable {
+        if (::chatList.isInitialized && messages.isNotEmpty()) {
+            chatList.scrollToPosition(messages.lastIndex)
+        }
+    }
 
     private val chooseModel = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(::importAndLoadModel)
@@ -92,6 +99,20 @@ class MainActivity : AppCompatActivity() {
         chatAdapter = ChatAdapter(messages)
         chatList.layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
         chatList.adapter = chatAdapter
+        chatList.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            private var userDragging = false
+
+            override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                userDragging = newState == RecyclerView.SCROLL_STATE_DRAGGING
+                if (newState == RecyclerView.SCROLL_STATE_IDLE) {
+                    autoFollowResponse = isChatNearBottom()
+                }
+            }
+
+            override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                if (userDragging) autoFollowResponse = isChatNearBottom()
+            }
+        })
         replaceChat("Preparing private, on-device inference…")
         applySystemInsets(findViewById(R.id.root))
         modelButton.isEnabled = false
@@ -210,18 +231,6 @@ class MainActivity : AppCompatActivity() {
                 false
             }
         }
-        bindSuggestion(
-            R.id.suggestionQmx,
-            "What is Qualcomm Matrix Extension and how does it accelerate this model?",
-        )
-        bindSuggestion(
-            R.id.suggestionModel,
-            "Explain the model running on this phone and its quantization.",
-        )
-        bindSuggestion(
-            R.id.suggestionPrivate,
-            "Why is private on-device AI useful?",
-        )
         findViewById<Button>(R.id.clearButton).setOnClickListener {
             if (!modelReady || generationJob?.isActive == true) return@setOnClickListener
             setControlsEnabled(false)
@@ -577,7 +586,8 @@ class MainActivity : AppCompatActivity() {
         if (!hasConversation) clearChat()
         hasConversation = true
         addMessage(ChatMessage(prompt, isUser = true))
-        val assistantIndex = addMessage(ChatMessage("Thinking…", isUser = false))
+        val assistantIndex = addMessage(ChatMessage("Preparing a response…", isUser = false))
+        autoFollowResponse = true
         setControlsEnabled(false)
         sendButton.isEnabled = true
         sendButton.setImageResource(R.drawable.ic_stop)
@@ -586,20 +596,28 @@ class MainActivity : AppCompatActivity() {
 
         val response = StringBuilder()
         generationJob = lifecycleScope.launch {
+            val renderThrottle = StreamRenderThrottle(STREAM_RENDER_INTERVAL_MS)
             runCatching {
                 engine.sendUserPrompt(prompt, predictLength = 256).collect { token ->
                     response.append(token)
-                    messages[assistantIndex].text = response.toString()
-                    chatAdapter.notifyItemChanged(assistantIndex)
-                    scrollChat()
+                    if (renderThrottle.shouldRender(SystemClock.uptimeMillis())) {
+                        renderAssistantText(assistantIndex, response.toString())
+                    }
                 }
+                renderAssistantText(
+                    assistantIndex,
+                    response.toString().ifEmpty { "Gemma did not return any text." },
+                    forceScroll = true,
+                )
             }.onFailure { error ->
-                if (error is kotlinx.coroutines.CancellationException && response.isEmpty()) {
-                    messages[assistantIndex].text = "Generation stopped."
-                    chatAdapter.notifyItemChanged(assistantIndex)
+                if (error is kotlinx.coroutines.CancellationException) {
+                    renderAssistantText(
+                        assistantIndex,
+                        response.toString().ifEmpty { "Generation stopped." },
+                        forceScroll = true,
+                    )
                 } else if (error !is kotlinx.coroutines.CancellationException) {
-                    messages[assistantIndex].text = "Error: ${error.message}"
-                    chatAdapter.notifyItemChanged(assistantIndex)
+                    renderAssistantText(assistantIndex, "Error: ${error.message}", forceScroll = true)
                     Log.e(TAG, "Generation failed", error)
                 }
             }
@@ -610,20 +628,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun bindSuggestion(viewId: Int, prompt: String) {
-        findViewById<TextView>(viewId).setOnClickListener {
-            promptInput.setText(prompt)
-            promptInput.setSelection(prompt.length)
-            if (modelReady && generationJob?.isActive != true) sendPrompt()
-        }
-    }
-
     private fun addMessage(message: ChatMessage): Int {
         val index = messages.size
         messages.add(message)
         chatAdapter.notifyItemInserted(index)
-        scrollChat()
+        scrollChat(force = true)
         return index
+    }
+
+    private fun renderAssistantText(index: Int, text: String, forceScroll: Boolean = false) {
+        chatAdapter.updateText(index, text)
+        scrollChat(force = forceScroll)
     }
 
     private fun replaceChat(message: String) {
@@ -632,7 +647,7 @@ class MainActivity : AppCompatActivity() {
         if (previousCount > 0) chatAdapter.notifyItemRangeRemoved(0, previousCount)
         messages.add(ChatMessage(message, isUser = false))
         chatAdapter.notifyItemInserted(0)
-        scrollChat()
+        scrollChat(force = true)
     }
 
     private fun clearChat() {
@@ -663,8 +678,15 @@ class MainActivity : AppCompatActivity() {
         return name
     }
 
-    private fun scrollChat() = chatList.post {
-        if (messages.isNotEmpty()) chatList.scrollToPosition(messages.lastIndex)
+    private fun isChatNearBottom(): Boolean {
+        val layoutManager = chatList.layoutManager as? LinearLayoutManager ?: return true
+        return layoutManager.findLastVisibleItemPosition() >= messages.lastIndex - 1
+    }
+
+    private fun scrollChat(force: Boolean = false) {
+        if (!force && !autoFollowResponse) return
+        chatList.removeCallbacks(scrollToBottom)
+        chatList.postOnAnimation(scrollToBottom)
     }
 
     private fun applySystemInsets(root: View) {
@@ -737,6 +759,7 @@ class MainActivity : AppCompatActivity() {
         private const val COPY_BUFFER_BYTES = 4 * 1024 * 1024
         private const val FREE_SPACE_HEADROOM = 512L * 1024 * 1024
         private const val DOWNLOAD_POLL_INTERVAL_MS = 1_000L
+        private const val STREAM_RENDER_INTERVAL_MS = 48L
 
         private fun formatBytes(bytes: Long): String = when {
             bytes < 0 -> "unknown size"
