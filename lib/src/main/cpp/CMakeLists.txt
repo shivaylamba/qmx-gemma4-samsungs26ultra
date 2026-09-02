@@ -33,6 +33,8 @@ endif()
 set(LLAMA_SRC ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/llama.cpp-current)
 set(QUALCOMM_KLEIDIAI_QMX_SRC ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/kleidiai-qmx)
 if(GGML_CPU_KLEIDIAI)
+    set(KLEIDIAI_BUILD_TESTS OFF CACHE BOOL "Do not build KleidiAI tests in the APK" FORCE)
+    set(KLEIDIAI_BUILD_BENCHMARK OFF CACHE BOOL "Do not build KleidiAI benchmarks in the APK" FORCE)
     if(NOT EXISTS "${QUALCOMM_KLEIDIAI_QMX_SRC}/kai/kai_common.h")
         message(FATAL_ERROR
             "Qualcomm KleidiAI QMX sources are missing. Run: git submodule update --init --recursive")
@@ -49,7 +51,8 @@ endif()
 add_subdirectory(${LLAMA_SRC} build-llama)
 
 add_library(${CMAKE_PROJECT_NAME} SHARED
-        ai_chat.cpp)
+        ai_chat.cpp
+        ai_tts.cpp)
 
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
         GGML_SYSTEM_ARCH=${GGML_SYSTEM_ARCH}
@@ -62,10 +65,12 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
         ${LLAMA_SRC}/common
         ${LLAMA_SRC}/include
         ${LLAMA_SRC}/ggml/include
-        ${LLAMA_SRC}/ggml/src)
+        ${LLAMA_SRC}/ggml/src
+        ${LLAMA_SRC}/tools/mtmd)
 
 target_link_libraries(${CMAKE_PROJECT_NAME}
         llama
         llama-common
+        mtmd
         android
         log)

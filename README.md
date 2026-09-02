@@ -89,6 +89,59 @@ an explicit layer count through ADB.
 The Gradle wrapper downloads Gradle 8.14.3. Android and Kotlin plugin versions
 are pinned in `gradle/libs.versions.toml`.
 
+## QMX Voice Lab APK
+
+This repository also contains a separate `voice-app` application for testing
+on-device text-to-speech latency. It uses llama.cpp's first-class Qwen3-TTS
+pipeline with these files from
+[`ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF`](https://huggingface.co/ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF):
+
+- `Qwen3-TTS-12Hz-1.7B-Base-Q8_0.gguf`, 1,847,874,400 bytes
+- `mmproj-Qwen3-TTS-12Hz-1.7B-Base-Q8_0.gguf`, 446,422,912 bytes
+
+The model files are not packaged in the APK. The app downloads both files from
+Hugging Face, checks their exact sizes and SHA-256 hashes, and keeps them in
+app-specific storage. The downloader resumes partial files and remains attached
+when Android recreates the Activity. Raw `adb push` or `run-as` copies into this
+directory are not a supported installation method because Android 16 scoped
+storage can expose a different mount view to the application. Use the in-app
+download flow for a reproducible installation.
+
+Build and install the voice APK:
+
+```powershell
+$env:JAVA_HOME = "C:\path\to\jdk-21"
+.\gradlew.bat :voice-app:assembleDebug
+adb install -r .\voice-app\build\outputs\apk\debug\voice-app-debug.apk
+```
+
+The app provides single synthesis runs and a matched 1-thread versus 4-thread
+comparison. It reports prompt prefill, the first generated audio-frame proxy,
+time until the complete WAV is playable, audio duration, and real-time factor.
+The current `libmtmd` helper returns the WAV after synthesis, so the displayed
+first-frame value is not a streaming playback measurement.
+
+QMX coverage is deliberately reported per stage. Every transformer block in
+the Q8_0 backbone is targeted dynamically by tensor name, without a hard-coded
+layer count. The published backbone reports architecture `qwen3tts`, 28 blocks,
+196 two-dimensional Q8_0 block-weight tensors, and 112 F32 block vectors. QMX
+can accept the eligible Q8_0 matrix operations; F32 normalization vectors and
+unsupported operations follow ordinary CPU paths. A successful test must
+observe all of the following at runtime:
+
+```text
+kleidiai: primary q8 kernel feature SME
+load_tensors: CPU_KLEIDIAI model buffer size = ...
+kleidiai: executing Qualcomm QMX Q8 SME1 GEMM/prefill kernel (...)
+kleidiai: executing Qualcomm QMX Q8 SME1 GEMV/decode kernel (...)
+```
+
+The Q8 backbone's eligible linear matrix operations can use QMX. The audio
+projector and waveform decoder are loaded by `libmtmd` and currently remain on
+ordinary CPU paths, as do sampling and non-matrix operators. The UI distinguishes
+QMX selection from actual GEMM and GEMV execution so a fallback cannot appear as
+a successful QMX result.
+
 ## Clone and prepare
 
 ```powershell

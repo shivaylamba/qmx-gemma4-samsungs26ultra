@@ -17,3 +17,4 @@ dependencyResolutionManagement {
 rootProject.name = "QmxGemma"
 include(":app")
 include(":lib")
+include(":voice-app")

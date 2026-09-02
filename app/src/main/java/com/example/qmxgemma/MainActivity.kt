@@ -139,63 +139,66 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch(Dispatchers.Default) {
             engine = AiChat.getInferenceEngine(applicationContext)
-            engine.state.first {
-                it is InferenceEngine.State.Initialized || it is InferenceEngine.State.Error
+            val startupState = engine.state.first {
+                engineStartupAction(it) != EngineStartupAction.WAIT
             }
-            if (engine.state.value is InferenceEngine.State.Initialized) {
-                runtimeReady = true
-                val modelsDir = File(filesDir, "models")
-                val requestedModelName = intent.getStringExtra(EXTRA_MODEL_NAME)
-                    ?.takeIf { it == File(it).name }
-                val importedModel = if (requestedModelName != null) {
-                    File(modelsDir, requestedModelName).takeIf {
-                        it.isFile && it.extension.equals("gguf", ignoreCase = true)
+            runtimeReady = startupState !is InferenceEngine.State.Error
+            when (engineStartupAction(startupState)) {
+                EngineStartupAction.LOAD_MODEL -> {
+                    val modelsDir = File(filesDir, "models")
+                    val requestedModelName = intent.getStringExtra(EXTRA_MODEL_NAME)
+                        ?.takeIf { it == File(it).name }
+                    val importedModel = if (requestedModelName != null) {
+                        File(modelsDir, requestedModelName).takeIf {
+                            it.isFile && it.extension.equals("gguf", ignoreCase = true)
+                        }
+                    } else {
+                        modelsDir.listFiles()
+                            ?.filter { it.isFile && it.extension.equals("gguf", ignoreCase = true) }
+                            ?.maxByOrNull(File::lastModified)
                     }
-                } else {
-                    modelsDir.listFiles()
-                        ?.filter { it.isFile && it.extension.equals("gguf", ignoreCase = true) }
-                        ?.maxByOrNull(File::lastModified)
-                }
-                val downloadedModel = if (
-                    importedModel == null &&
-                    (requestedModelName == null || requestedModelName == HuggingFaceModelDownload.MODEL_FILENAME)
-                ) {
-                    verifiedDownloadedModel()
-                } else {
-                    null
-                }
-                val existingModel = importedModel ?: downloadedModel
-                Log.i(TAG, "QMX_MODEL_SELECTION requested=$requestedModelName selected=${existingModel?.name}")
-                if (existingModel != null) {
-                    try {
-                        loadModelFile(existingModel)
-                    } catch (error: Exception) {
-                        Log.e(TAG, "Could not reload the imported model", error)
+                    val downloadedModel = if (
+                        importedModel == null &&
+                        (requestedModelName == null || requestedModelName == HuggingFaceModelDownload.MODEL_FILENAME)
+                    ) {
+                        verifiedDownloadedModel()
+                    } else {
+                        null
+                    }
+                    val existingModel = importedModel ?: downloadedModel
+                    Log.i(TAG, "QMX_MODEL_SELECTION requested=$requestedModelName selected=${existingModel?.name}")
+                    if (existingModel != null) {
+                        try {
+                            loadModelFile(existingModel)
+                        } catch (error: Exception) {
+                            Log.e(TAG, "Could not reload the imported model", error)
+                            withContext(Dispatchers.Main) {
+                                showError(error.message ?: "Could not reload the imported model")
+                            }
+                        }
+                    } else {
                         withContext(Dispatchers.Main) {
-                            showError(error.message ?: "Could not reload the imported model")
+                            statusText.text = "Runtime ready · choose a model"
+                            qmxBadge.text = "MODEL NEEDED"
+                            qmxBadge.setBackgroundResource(R.drawable.badge_loading)
+                            loadingProgress.visibility = View.GONE
+                            modelButton.isEnabled = true
+                            downloadModelButton.isEnabled = true
                         }
                     }
-                } else {
                     withContext(Dispatchers.Main) {
-                        statusText.text = "Runtime ready · choose a model"
-                        qmxBadge.text = "MODEL NEEDED"
-                        qmxBadge.setBackgroundResource(R.drawable.badge_loading)
-                        loadingProgress.visibility = View.GONE
-                        modelButton.isEnabled = true
-                        downloadModelButton.isEnabled = true
+                        refreshDownloadButton()
+                        monitorModelDownload()
                     }
                 }
-                withContext(Dispatchers.Main) {
-                    refreshDownloadButton()
-                    monitorModelDownload()
-                }
-            } else {
-                withContext(Dispatchers.Main) {
+                EngineStartupAction.RESTORE_MODEL -> restoreLoadedModel()
+                EngineStartupAction.SHOW_ERROR -> withContext(Dispatchers.Main) {
                     statusText.text = "Native runtime failed to start"
                     qmxBadge.text = "RUNTIME ERROR"
                     qmxBadge.setBackgroundResource(R.drawable.badge_fallback)
                     loadingProgress.visibility = View.GONE
                 }
+                EngineStartupAction.WAIT -> Unit
             }
         }
 
@@ -453,6 +456,7 @@ class MainActivity : AppCompatActivity() {
                 "You are Gemma, a concise and helpful assistant running privately on this phone."
             )
             modelReady = true
+            activeModelPath = modelFile.absolutePath
         }
         withContext(Dispatchers.Main) {
             showAccelerationStatus()
@@ -462,6 +466,24 @@ class MainActivity : AppCompatActivity() {
             )
             hasConversation = false
             setControlsEnabled(true)
+        }
+        runRequestedBenchmark()
+    }
+
+    private suspend fun restoreLoadedModel() {
+        modelReady = true
+        val modelFile = activeModelPath?.let(::File)?.takeIf(File::isFile)
+        withContext(Dispatchers.Main) {
+            showAccelerationStatus()
+            modelText.text = modelFile?.let { "${it.name} · ${formatBytes(it.length())}" }
+                ?: "Model already loaded in this process"
+            replaceChat(
+                "Gemma is ready. The process-scoped model remained loaded while the screen was recreated.",
+            )
+            hasConversation = false
+            setControlsEnabled(true)
+            refreshDownloadButton()
+            monitorModelDownload()
         }
         runRequestedBenchmark()
     }
@@ -751,6 +773,8 @@ class MainActivity : AppCompatActivity() {
         private const val EXTRA_MODEL_NAME = "model_name"
         private const val EXTRA_BENCH_THREADS = "bench_threads"
         private const val EXTRA_BENCH_RUNS = "bench_runs"
+        @Volatile
+        private var activeModelPath: String? = null
         private const val BENCH_PROMPT_TOKENS = 128
         private const val BENCH_DECODE_TOKENS = 128
         private const val AUTO_QMX_PROBE_LAYERS = 2
