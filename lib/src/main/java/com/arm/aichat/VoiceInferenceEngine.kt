@@ -43,7 +43,12 @@ class VoiceInferenceEngine private constructor(context: Context) {
         get() = loaded
 
     private external fun nativeInit(nativeLibDir: String)
-    private external fun nativeLoad(backbonePath: String, mmprojPath: String, threads: Int): Int
+    private external fun nativeLoad(
+        backbonePath: String,
+        mmprojPath: String,
+        threads: Int,
+        qmxLayers: Int,
+    ): Int
     private external fun nativeSynthesize(
         prompt: String,
         language: String,
@@ -52,6 +57,7 @@ class VoiceInferenceEngine private constructor(context: Context) {
         maxFrames: Int,
     ): String?
     private external fun nativeQmxStatus(): String
+    private external fun nativeActivateTelemetry()
     private external fun nativeLastError(): String
     private external fun nativeUnload()
     private external fun nativeShutdown()
@@ -64,13 +70,25 @@ class VoiceInferenceEngine private constructor(context: Context) {
         initialized = true
     }
 
-    suspend fun load(backbone: File, mmproj: File, threads: Int = 1) = withContext(Dispatchers.IO) {
+    suspend fun load(
+        backbone: File,
+        mmproj: File,
+        threads: Int = 1,
+        qmxLayers: Int = ALL_QMX_LAYERS,
+    ) = withContext(Dispatchers.IO) {
         check(initialized) { "Initialize the voice runtime first" }
         require(backbone.isFile) { "Backbone model not found" }
         require(mmproj.isFile) { "Audio projector model not found" }
-        val result = nativeLoad(backbone.absolutePath, mmproj.absolutePath, threads)
+        require(qmxLayers >= ALL_QMX_LAYERS) { "QMX layer count cannot be negative" }
+        val result = nativeLoad(backbone.absolutePath, mmproj.absolutePath, threads, qmxLayers)
         check(result == 0) { nativeLastError().ifBlank { "Native model load failed ($result)" } }
         loaded = true
+    }
+
+    /** Routes process-wide llama.cpp and multimodal logs back to the voice proof tracker. */
+    fun activateTelemetry() {
+        check(initialized) { "Initialize the voice runtime first" }
+        nativeActivateTelemetry()
     }
 
     suspend fun synthesize(
@@ -124,6 +142,8 @@ class VoiceInferenceEngine private constructor(context: Context) {
     )
 
     companion object {
+        const val ALL_QMX_LAYERS = 0
+
         @Volatile
         private var instance: VoiceInferenceEngine? = null
 

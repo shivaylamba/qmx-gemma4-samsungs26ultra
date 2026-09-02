@@ -50,6 +50,17 @@ static std::atomic<bool>                  g_q8_sme_kernel(false);
 static std::atomic<int>                   g_kleidiai_buffer_centimib(0);
 static std::atomic<int>                   g_qmx_accelerated_layers(FALLBACK_QMX_PROBE_LAYERS);
 
+static bool qmx_model_buffer_active() {
+    const char *sme_override = std::getenv("GGML_KLEIDIAI_SME");
+    const bool process_sme_selected = g_sme_enabled.load() && g_q8_sme_kernel.load();
+    const bool explicit_sme_selected = sme_override != nullptr && std::strcmp(sme_override, "1") == 0;
+    // KleidiAI emits kernel-selection messages once per process. In the combined
+    // app the voice engine can receive those first, so the current model's
+    // CPU_KLEIDIAI buffer plus the explicit SME setting is the durable proof.
+    return g_kleidiai_buffer_centimib.load() > 0 &&
+           (process_sme_selected || explicit_sme_selected);
+}
+
 static int requested_qmx_layers() {
     const char *value = std::getenv("QMX_ACCELERATED_LAYERS");
     if (value == nullptr || *value == '\0') {
@@ -81,6 +92,13 @@ static void qmx_tracking_log_callback(
             g_kleidiai_buffer_centimib.store((int) std::lround(mib * 100.0));
         }
     }
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_arm_aichat_internal_InferenceEngineImpl_nativeActivateTelemetry(
+        JNIEnv *, jobject /*unused*/) {
+    llama_log_set(qmx_tracking_log_callback, nullptr);
 }
 
 extern "C"
@@ -219,7 +237,7 @@ JNIEXPORT jstring JNICALL
 Java_com_arm_aichat_internal_InferenceEngineImpl_nativeAccelerationInfo(
         JNIEnv *env, jobject /*unused*/) {
     const int buffer_centimib = g_kleidiai_buffer_centimib.load();
-    const bool qmx_active = g_sme_enabled.load() && g_q8_sme_kernel.load() && buffer_centimib > 0;
+    const bool qmx_active = qmx_model_buffer_active();
     std::ostringstream result;
     if (qmx_active) {
         result << "QMX active · CPU_KLEIDIAI/SME · "
@@ -237,7 +255,7 @@ JNIEXPORT jlongArray JNICALL
 Java_com_arm_aichat_internal_InferenceEngineImpl_nativeQmxRuntimeStats(
         JNIEnv *env, jobject /*unused*/) {
     const int buffer_centimib = g_kleidiai_buffer_centimib.load();
-    const bool qmx_active = g_sme_enabled.load() && g_q8_sme_kernel.load() && buffer_centimib > 0;
+    const bool qmx_active = qmx_model_buffer_active();
     const jlong values[] = {
             qmx_active ? 1L : 0L,
             (jlong) buffer_centimib,

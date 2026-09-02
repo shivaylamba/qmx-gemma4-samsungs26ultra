@@ -1,6 +1,7 @@
 #include <android/log.h>
 #include <jni.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -8,6 +9,7 @@
 #include <fstream>
 #include <iomanip>
 #include <memory>
+#include <malloc.h>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -125,7 +127,8 @@ Java_com_arm_aichat_VoiceInferenceEngine_nativeInit(
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_arm_aichat_VoiceInferenceEngine_nativeLoad(
-        JNIEnv * env, jobject, jstring backbone_path, jstring mmproj_path, jint threads) {
+        JNIEnv * env, jobject, jstring backbone_path, jstring mmproj_path, jint threads,
+        jint requested_qmx_layers) {
     std::lock_guard<std::mutex> lock(voice_mutex);
     free_voice_model();
     voice_error.clear();
@@ -141,8 +144,21 @@ Java_com_arm_aichat_VoiceInferenceEngine_nativeLoad(
             mapped_buffer_probe, sizeof(mapped_buffer_probe));
     ggml_backend_buffer_type_t mapped_buffer_type = ggml_backend_buffer_get_type(mapped_buffer);
 
+    std::string qmx_blocks_pattern = "^blk\\.[0-9]+\\.";
+    if (requested_qmx_layers > 0) {
+        std::ostringstream qmx_blocks;
+        qmx_blocks << "^blk\\.(";
+        for (int layer = 0; layer < requested_qmx_layers; ++layer) {
+            if (layer > 0) {
+                qmx_blocks << "|";
+            }
+            qmx_blocks << layer;
+        }
+        qmx_blocks << ")\\.";
+        qmx_blocks_pattern = qmx_blocks.str();
+    }
     const llama_model_tensor_buft_override tensor_overrides[] = {
-            {"^blk\\.[0-9]+\\.", ggml_backend_cpu_buffer_type()},
+            {qmx_blocks_pattern.c_str(), ggml_backend_cpu_buffer_type()},
             {".*", mapped_buffer_type},
             {nullptr, nullptr},
     };
@@ -157,7 +173,10 @@ Java_com_arm_aichat_VoiceInferenceEngine_nativeLoad(
         env->ReleaseStringUTFChars(mmproj_path, mmproj);
         return 1;
     }
-    voice_layers.store(static_cast<int>(llama_model_n_layer(voice_model)));
+    const int total_layers = static_cast<int>(llama_model_n_layer(voice_model));
+    voice_layers.store(requested_qmx_layers > 0
+            ? std::min(static_cast<int>(requested_qmx_layers), total_layers)
+            : total_layers);
 
     llama_context_params context_params = llama_context_default_params();
     context_params.n_ctx = VOICE_CONTEXT_SIZE;
@@ -350,6 +369,12 @@ Java_com_arm_aichat_VoiceInferenceEngine_nativeQmxStatus(JNIEnv * env, jobject) 
     return env->NewStringUTF(result.c_str());
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_arm_aichat_VoiceInferenceEngine_nativeActivateTelemetry(JNIEnv *, jobject) {
+    llama_log_set(voice_log_callback, nullptr);
+    mtmd_log_set(voice_log_callback, nullptr);
+}
+
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_arm_aichat_VoiceInferenceEngine_nativeLastError(JNIEnv * env, jobject) {
     return env->NewStringUTF(voice_error.c_str());
@@ -359,6 +384,8 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_arm_aichat_VoiceInferenceEngine_nativeUnload(JNIEnv *, jobject) {
     std::lock_guard<std::mutex> lock(voice_mutex);
     free_voice_model();
+    LOGi("Native heap purge after voice unload: %s",
+         mallopt(M_PURGE_ALL, 0) == 1 ? "complete" : "not supported");
 }
 
 extern "C" JNIEXPORT void JNICALL

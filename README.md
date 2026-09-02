@@ -142,6 +142,43 @@ ordinary CPU paths, as do sampling and non-matrix operators. The UI distinguishe
 QMX selection from actual GEMM and GEMV execution so a fallback cannot appear as
 a successful QMX result.
 
+## Combined QMX Voice Assistant APK
+
+The `assistant-app` module combines Gemma 4 E2B chat and Qwen3-TTS in one
+Kotlin application. It downloads and verifies all three GGUF files itself,
+streams the Gemma answer into a multi-turn transcript, synthesizes that answer,
+plays the resulting WAV, and exposes measured LLM and TTS latency in the UI.
+
+The two Q8 models are deliberately not resident at the same time. A co-resident
+device experiment was terminated by Android's low-memory killer after swap
+usage reached roughly 8.3 GB. The production coordinator therefore performs a
+sequential handoff:
+
+1. Gemma generates the text response.
+2. Gemma and its QMX-packed buffer are unloaded and the native heap is purged.
+3. Qwen3-TTS loads, synthesizes and starts playback, then unloads and purges.
+4. Gemma reloads with a bounded textual reconstruction of the conversation so
+   follow-up questions retain context.
+
+This build assigns two Gemma blocks and four Qwen3-TTS blocks to the
+`CPU_KLEIDIAI` buffer. All other weights stay memory-mapped and unsupported
+operators continue on ordinary CPU paths. The first startup performs a short
+voice warm-up and requires runtime evidence for both the QMX GEMM/prefill and
+GEMV/decode entry points before it reports the voice path as proven.
+
+Build and install the combined APK:
+
+```powershell
+$env:JAVA_HOME = "C:\path\to\jdk-21"
+.\gradlew.bat :assistant-app:testDebugUnitTest :assistant-app:lintDebug :assistant-app:assembleDebug
+adb install -r .\assistant-app\build\outputs\apk\debug\assistant-app-debug.apk
+adb shell am start -n com.example.qmxassistant/.MainActivity
+```
+
+The APK is only the application and native runtime. The 7.26 GB of model data
+is downloaded from Hugging Face after installation and stored in app-specific
+external storage. Uninstalling the app removes those downloaded files.
+
 ## Clone and prepare
 
 ```powershell

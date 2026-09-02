@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">QMX Voice Assistant</string>
+    <string name="title">QMX Voice Assistant</string>
+    <string name="subtitle">Private reasoning and speech with memory-safe QMX handoff</string>
+    <string name="starting">Starting native runtimes</string>
+    <string name="models_needed">Models required</string>
+    <string name="model_summary">Gemma 4 E2B Q8 + Qwen3-TTS 1.7B Q8 · 7.26 GB</string>
+    <string name="download_models">Download all models</string>
+    <string name="cancel_download">Cancel download</string>
+    <string name="download_progress">Downloading %1$d%% · %2$s / %3$s</string>
+    <string name="verifying">Verifying model checksums</string>
+    <string name="loading_voice">Loading Qwen3-TTS with a four-block QMX budget</string>
+    <string name="warming_voice">Proving QMX execution with a short voice warm-up</string>
+    <string name="loading_llm">Loading Gemma with a two-block QMX budget</string>
+    <string name="ready">Ready for private voice chat · Gemma resident</string>
+    <string name="ready_badge">READY</string>
+    <string name="waiting_badge">SETUP</string>
+    <string name="error_badge">ERROR</string>
+    <string name="prompt_hint">Ask the assistant</string>
+    <string name="send">Send</string>
+    <string name="speak_answers">Speak answers automatically</string>
+    <string name="play_last">Play last answer</string>
+    <string name="new_chat">New chat</string>
+    <string name="thinking">Gemma is thinking on device</string>
+    <string name="speaking">Qwen3-TTS is synthesizing the answer</string>
+    <string name="unloading_llm">Freeing Gemma memory before speech</string>
+    <string name="restoring_llm">Freeing voice memory and restoring Gemma</string>
+    <string name="answer_ready">Answer and audio are ready</string>
+    <string name="answer_text_ready">Answer is ready</string>
+    <string name="assistant_placeholder">Preparing a response…</string>
+    <string name="welcome">Download the three model files, then ask a question. Gemma and Qwen3-TTS run one at a time so their Q8 weights never compete for RAM.</string>
+    <string name="download_failed">Model download failed: %1$s</string>
+    <string name="load_failed">Model setup failed: %1$s</string>
+    <string name="inference_failed">Inference failed: %1$s</string>
+    <string name="conversation_cleared">Conversation cleared.</string>
+    <string name="runtime_metrics">LLM: %1$s\nVoice: QMX %2$s · %3$.0f MiB · %4$d blocks\nMemory mode: sequential model handoff</string>
+    <string name="turn_metrics">LLM TTFT %1$d ms · total %2$d ms\nTTS first frame %3$.0f ms · total %4$.2f s · RTF %5$.2f</string>
+</resources>
