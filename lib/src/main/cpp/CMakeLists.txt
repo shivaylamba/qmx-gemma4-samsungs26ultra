@@ -31,22 +31,12 @@ if(DEFINED ANDROID_ABI)
 endif()
 
 set(LLAMA_SRC ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/llama.cpp-current)
-set(QUALCOMM_KLEIDIAI_QMX_SRC ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/kleidiai-qmx)
 if(GGML_CPU_KLEIDIAI)
     set(KLEIDIAI_BUILD_TESTS OFF CACHE BOOL "Do not build KleidiAI tests in the APK" FORCE)
     set(KLEIDIAI_BUILD_BENCHMARK OFF CACHE BOOL "Do not build KleidiAI benchmarks in the APK" FORCE)
-    if(NOT EXISTS "${QUALCOMM_KLEIDIAI_QMX_SRC}/kai/kai_common.h")
-        message(FATAL_ERROR
-            "Qualcomm KleidiAI QMX sources are missing. Run: git submodule update --init --recursive")
-    endif()
-
-    # llama.cpp obtains KleidiAI through FetchContent. This standard override
-    # replaces its upstream release archive with our pinned Qualcomm QMX
-    # submodule without relying on a machine-specific absolute path.
-    set(FETCHCONTENT_SOURCE_DIR_KLEIDIAI_DOWNLOAD
-        "${QUALCOMM_KLEIDIAI_QMX_SRC}" CACHE PATH
-        "Pinned Qualcomm KleidiAI QMX source tree" FORCE)
-    message(STATUS "Using Qualcomm KleidiAI QMX: ${QUALCOMM_KLEIDIAI_QMX_SRC}")
+    # llama.cpp owns the KleidiAI FetchContent declaration. Its patched
+    # ggml-cpu CMake file downloads the pinned Qualcomm QMX commit.
+    unset(FETCHCONTENT_SOURCE_DIR_KLEIDIAI_DOWNLOAD CACHE)
 endif()
 add_subdirectory(${LLAMA_SRC} build-llama)
 

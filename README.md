@@ -187,10 +187,10 @@ cd qmx-gemma4-samsungs26ultra
 powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1
 ```
 
-The setup script initializes the pinned upstream llama.cpp and Qualcomm
-KleidiAI QMX submodules. It idempotently applies both app-owned patches from
-`patches/`: the QMX SME1 kernel binding and the small Gemma
-`enable_thinking=false` template change.
+The setup script initializes the pinned upstream llama.cpp submodule. The QMX
+patch makes llama.cpp download the pinned Qualcomm KleidiAI commit directly.
+It idempotently applies both app-owned patches from `patches/`: the QMX SME1
+kernel binding and the small Gemma `enable_thinking=false` template change.
 
 If Android Studio has not created `local.properties`, create it with your SDK
 path, for example:
