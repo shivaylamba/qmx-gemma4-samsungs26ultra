@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.31.6)
 
 project("ai-chat" VERSION 1.0.0 LANGUAGES C CXX)
 
+include(FetchContent)
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED true)
 
@@ -40,9 +42,20 @@ if(GGML_CPU_KLEIDIAI)
 endif()
 add_subdirectory(${LLAMA_SRC} build-llama)
 
+# KittenML's Apache-2.0 CE phonemizer is used to prepare IPA tokens for the
+# KittenTTS ONNX model. Pin both the source revision and archive digest so the
+# Android build is reproducible and does not silently pick up upstream changes.
+FetchContent_Declare(kittentts_phonemizer
+        URL https://github.com/KittenML/KittenTTS-flutter/archive/00d8286ff51409387c5e1c15eb3057506280334a.tar.gz
+        URL_HASH SHA256=a12783fdd7dd7edb4794a2c7ae9a34ce77613a9590a62e5acdd8944d798aff4d)
+FetchContent_MakeAvailable(kittentts_phonemizer)
+set(KITTENTTS_PHONEMIZER_SRC ${kittentts_phonemizer_SOURCE_DIR}/src/cephonemizer)
+
 add_library(${CMAKE_PROJECT_NAME} SHARED
         ai_chat.cpp
-        ai_tts.cpp)
+        ai_tts.cpp
+        kitten_phonemizer_jni.cpp
+        ${KITTENTTS_PHONEMIZER_SRC}/phonemizer.cpp)
 
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
         GGML_SYSTEM_ARCH=${GGML_SYSTEM_ARCH}
@@ -56,7 +69,8 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
         ${LLAMA_SRC}/include
         ${LLAMA_SRC}/ggml/include
         ${LLAMA_SRC}/ggml/src
-        ${LLAMA_SRC}/tools/mtmd)
+        ${LLAMA_SRC}/tools/mtmd
+        ${KITTENTTS_PHONEMIZER_SRC})
 
 target_link_libraries(${CMAKE_PROJECT_NAME}
         llama

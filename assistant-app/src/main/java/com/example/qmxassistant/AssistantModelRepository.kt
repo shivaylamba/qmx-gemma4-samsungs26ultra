@@ -19,7 +19,7 @@ internal class AssistantModelRepository(context: Context) {
         val name: String,
         val bytes: Long,
         val sha256: String,
-        val repository: String,
+        val url: String,
     )
 
     sealed interface State {
@@ -37,6 +37,10 @@ internal class AssistantModelRepository(context: Context) {
     val gemmaFile: File get() = File(modelDir, GEMMA.name)
     val voiceBackboneFile: File get() = File(modelDir, VOICE_BACKBONE.name)
     val voiceProjectorFile: File get() = File(modelDir, VOICE_PROJECTOR.name)
+    val kittenModelFile: File get() = File(modelDir, KITTEN_MODEL.name)
+    val kittenVoicesFile: File get() = File(modelDir, KITTEN_VOICES.name)
+    val kittenRulesFile: File get() = File(modelDir, KITTEN_RULES.name)
+    val kittenListFile: File get() = File(modelDir, KITTEN_LIST.name)
     val totalBytes: Long get() = FILES.sumOf(ModelSpec::bytes)
 
     fun query(): State {
@@ -127,8 +131,7 @@ internal class AssistantModelRepository(context: Context) {
 
     private fun downloadAttempt(spec: ModelSpec, partial: File, index: Int, token: Long) {
         var offset = partial.length()
-        val url = "https://huggingface.co/${spec.repository}/resolve/main/${spec.name}?download=true"
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+        val connection = (URL(spec.url).openConnection() as HttpURLConnection).apply {
             instanceFollowRedirects = true
             connectTimeout = CONNECT_TIMEOUT_MS
             readTimeout = READ_TIMEOUT_MS
@@ -196,21 +199,53 @@ internal class AssistantModelRepository(context: Context) {
             name = "gemma-4-E2B-it-Q8_0.gguf",
             bytes = 4_967_497_152L,
             sha256 = "996d08777aadc6bfd3c7375ef70ba25a0f55240075860754fdb18d6d860aa63a",
-            repository = "ggml-org/gemma-4-E2B-it-GGUF",
+            url = "https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q8_0.gguf?download=true",
         )
         val VOICE_BACKBONE = ModelSpec(
             name = "Qwen3-TTS-12Hz-1.7B-Base-Q8_0.gguf",
             bytes = 1_847_874_400L,
             sha256 = "ac7931aeb2e7aad1a6ed6602d353a5679c9d096b18ce8204ac730a8408d572e1",
-            repository = "ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF",
+            url = "https://huggingface.co/ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF/resolve/main/Qwen3-TTS-12Hz-1.7B-Base-Q8_0.gguf?download=true",
         )
         val VOICE_PROJECTOR = ModelSpec(
             name = "mmproj-Qwen3-TTS-12Hz-1.7B-Base-Q8_0.gguf",
             bytes = 446_422_912L,
             sha256 = "6fd65188839bcd6ecc91b277ad471e22a0edfada4699a0fe82f1165c18cfcce2",
-            repository = "ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF",
+            url = "https://huggingface.co/ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF/resolve/main/mmproj-Qwen3-TTS-12Hz-1.7B-Base-Q8_0.gguf?download=true",
         )
-        private val FILES = listOf(GEMMA, VOICE_BACKBONE, VOICE_PROJECTOR)
+        val KITTEN_MODEL = ModelSpec(
+            name = "kitten_tts_nano_v0_8.onnx",
+            bytes = 56_767_095L,
+            sha256 = "320564d2615f235de972ca27a7f39551c94185cfa24ca85b07a29084135f1e5e",
+            url = "https://huggingface.co/KittenML/kitten-tts-nano-0.8-fp32/resolve/7a1db645b1f3ab9420761d87428e042b9cec3f26/kitten_tts_nano_v0_8.onnx?download=true",
+        )
+        val KITTEN_VOICES = ModelSpec(
+            name = "kitten-tts-nano-0.8-voices.npz",
+            bytes = 3_278_902L,
+            sha256 = "8aa7cee235abb0739cb51e6559685f65a4dacd95568833d05699b1633f519b3f",
+            url = "https://huggingface.co/KittenML/kitten-tts-nano-0.8-fp32/resolve/7a1db645b1f3ab9420761d87428e042b9cec3f26/voices.npz?download=true",
+        )
+        val KITTEN_RULES = ModelSpec(
+            name = "kitten-tts-en_rules",
+            bytes = 161_691L,
+            sha256 = "8e75e9341ea735cc514b29a7d3a95c6c241c1cc176ad43e5699b8f7f66ab3194",
+            url = "https://raw.githubusercontent.com/espeak-ng/espeak-ng/59eb19938f12e30881c81d86ce4a7de25414c9f4/dictsource/en_rules",
+        )
+        val KITTEN_LIST = ModelSpec(
+            name = "kitten-tts-en_list",
+            bytes = 102_788L,
+            sha256 = "24eb79018ed6253c10682096de672ce9265c1fe15c3e19e7f754d57a0fcd9790",
+            url = "https://raw.githubusercontent.com/espeak-ng/espeak-ng/59eb19938f12e30881c81d86ce4a7de25414c9f4/dictsource/en_list",
+        )
+        private val FILES = listOf(
+            GEMMA,
+            VOICE_BACKBONE,
+            VOICE_PROJECTOR,
+            KITTEN_MODEL,
+            KITTEN_VOICES,
+            KITTEN_RULES,
+            KITTEN_LIST,
+        )
         private const val PREFERENCES = "assistant_model_download"
         private const val VERIFIED = "verified"
         private const val TAG = "QmxAssistantModels"

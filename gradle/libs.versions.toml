@@ -11,6 +11,7 @@ material = "1.13.0"
 espresso-core = "3.7.0"
 androidx-junit = "1.3.0"
 junit = "4.13.2"
+onnxruntime = "1.29.0"
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -29,6 +30,7 @@ androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "a
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 recyclerview = { group = "androidx.recyclerview", name = "recyclerview", version = "1.4.0" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+onnxruntime-android = { group = "com.microsoft.onnxruntime", name = "onnxruntime-android", version.ref = "onnxruntime" }
 
 [bundles]
 androidx = [

@@ -1,5 +1,7 @@
 package com.example.qmxassistant
 
+import android.app.ActivityManager
+import android.content.Context
 import android.media.MediaPlayer
 import android.os.Bundle
 import android.os.SystemClock
@@ -7,12 +9,15 @@ import android.system.Os
 import android.view.View
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
+import android.widget.AdapterView
 import android.widget.Button
 import android.widget.ProgressBar
 import android.widget.ScrollView
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.edit
 import androidx.lifecycle.lifecycleScope
 import com.arm.aichat.AiChat
 import com.arm.aichat.InferenceEngine
@@ -45,16 +50,24 @@ class MainActivity : AppCompatActivity() {
     private lateinit var sendButton: Button
     private lateinit var newChatButton: Button
     private lateinit var playButton: Button
+    private lateinit var benchmarkButton: Button
     private lateinit var promptInput: TextInputEditText
     private lateinit var speakSwitch: MaterialSwitch
+    private lateinit var voiceBackendSpinner: Spinner
 
     private lateinit var repository: AssistantModelRepository
     private lateinit var voice: VoiceInferenceEngine
+    private lateinit var kittenVoice: KittenTtsEngine
     private lateinit var llm: InferenceEngine
     private val session = AssistantSession.process
     private var monitorJob: Job? = null
     private var workJob: Job? = null
     private var player: MediaPlayer? = null
+    private var pcmPlayer: StreamingPcmPlayer? = null
+    private var selectedVoiceBackend = VoiceBackend.QWEN_QMX
+    private val preferences by lazy {
+        getSharedPreferences(VOICE_PREFERENCES, Context.MODE_PRIVATE)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -72,11 +85,29 @@ class MainActivity : AppCompatActivity() {
         sendButton = findViewById(R.id.sendButton)
         newChatButton = findViewById(R.id.newChatButton)
         playButton = findViewById(R.id.playButton)
+        benchmarkButton = findViewById(R.id.benchmarkButton)
         promptInput = findViewById(R.id.promptInput)
         speakSwitch = findViewById(R.id.speakSwitch)
+        voiceBackendSpinner = findViewById(R.id.voiceBackendSpinner)
 
         repository = AssistantModelRepository(applicationContext)
         voice = VoiceInferenceEngine.getInstance(applicationContext)
+        kittenVoice = KittenTtsEngine()
+        selectedVoiceBackend = VoiceBackend.fromPreference(
+            preferences.getString(PREFERRED_VOICE_BACKEND, null),
+        )
+        voiceBackendSpinner.setSelection(selectedVoiceBackend.ordinal, false)
+        voiceBackendSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val selected = VoiceBackend.entries.getOrElse(position) { VoiceBackend.QWEN_QMX }
+                if (selected == selectedVoiceBackend) return
+                selectedVoiceBackend = selected
+                preferences.edit { putString(PREFERRED_VOICE_BACKEND, selected.preferenceValue) }
+                if (assistantReady && workJob?.isActive != true) switchVoiceBackend()
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
         Os.setenv(QMX_SWITCH, "1", true)
         Os.setenv(LLM_QMX_LAYERS_VARIABLE, LLM_QMX_LAYERS.toString(), true)
 
@@ -86,6 +117,7 @@ class MainActivity : AppCompatActivity() {
         sendButton.setOnClickListener { runPrompt() }
         newChatButton.setOnClickListener { clearConversation() }
         playButton.setOnClickListener { playLastAudio() }
+        benchmarkButton.setOnClickListener { runVoiceBenchmark() }
         promptInput.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEND) {
                 runPrompt()
@@ -172,6 +204,7 @@ class MainActivity : AppCompatActivity() {
         )
         downloadButton.text = getString(R.string.cancel_download)
         downloadButton.isEnabled = true
+        voiceBackendSpinner.isEnabled = false
     }
 
     private suspend fun verifyAndLoad() {
@@ -187,6 +220,8 @@ class MainActivity : AppCompatActivity() {
         if (assistantReady) {
             llm = AiChat.getInferenceEngine(applicationContext)
             if (llm.state.value is InferenceEngine.State.ModelReady) {
+                if (selectedVoiceBackend == VoiceBackend.KITTEN_CPU) ensureKittenLoaded()
+                else withContext(Dispatchers.IO) { kittenVoice.close() }
                 showReady()
                 return@withLock
             }
@@ -195,14 +230,61 @@ class MainActivity : AppCompatActivity() {
 
         setBusy(getString(R.string.loading_voice))
         runCatching {
-            proveVoiceQmxOnce()
+            if (selectedVoiceBackend == VoiceBackend.QWEN_QMX) proveVoiceQmxOnce()
             loadLlmWithHistory()
+            if (selectedVoiceBackend == VoiceBackend.KITTEN_CPU) ensureKittenLoaded()
             assistantReady = true
         }.onFailure { error ->
             assistantReady = false
             runCatching { if (voice.isLoaded) voice.unload() }
             showError(getString(R.string.load_failed, error.message ?: error.javaClass.simpleName))
         }.onSuccess { showReady() }
+    }
+
+    private suspend fun ensureKittenLoaded(threads: Int = preferredKittenThreads()) {
+        updateBusyMessage(getString(R.string.loading_kitten))
+        withContext(Dispatchers.IO) {
+            kittenVoice.load(
+                repository.kittenModelFile,
+                repository.kittenVoicesFile,
+                repository.kittenRulesFile,
+                repository.kittenListFile,
+                threads,
+            )
+        }
+    }
+
+    private fun preferredKittenThreads(): Int =
+        preferences.getInt(PREFERRED_KITTEN_THREADS, DEFAULT_TTS_THREADS).coerceIn(1, 8)
+
+    private fun switchVoiceBackend() {
+        workJob = lifecycleScope.launch {
+            assistantReady = false
+            setBusy(getString(R.string.loading_voice))
+            runCatching {
+                when (selectedVoiceBackend) {
+                    VoiceBackend.KITTEN_CPU -> ensureKittenLoaded()
+                    VoiceBackend.QWEN_QMX -> {
+                        withContext(Dispatchers.IO) { kittenVoice.close() }
+                        if (lastVoiceProof?.inferenceConfirmed != true) {
+                            lastLlmAcceleration = llm.accelerationInfo()
+                            withContext(Dispatchers.IO) { llm.cleanUp() }
+                            delay(MODEL_HANDOFF_DELAY_MS)
+                            proveVoiceQmxOnce()
+                            loadLlmWithHistory()
+                        }
+                    }
+                }
+            }.onFailure { error ->
+                showError(getString(R.string.load_failed, error.message ?: error.javaClass.simpleName))
+            }.onSuccess {
+                assistantReady = true
+                showReady()
+                statusText.text = getString(R.string.voice_backend_ready, selectedVoiceBackend.displayName)
+            }
+            progress.visibility = View.GONE
+            setControlsEnabled(true)
+        }
     }
 
     private suspend fun proveVoiceQmxOnce() {
@@ -214,7 +296,7 @@ class MainActivity : AppCompatActivity() {
                 repository.voiceBackboneFile,
                 repository.voiceProjectorFile,
                 threads = 1,
-                qmxLayers = VOICE_QMX_LAYERS,
+                qmxLayers = VOICE_QMX_PROBE_LAYERS,
             )
             updateBusyMessage(getString(R.string.warming_voice))
             val result = voice.synthesize(
@@ -231,6 +313,21 @@ class MainActivity : AppCompatActivity() {
             if (voice.isLoaded) withContext(Dispatchers.IO) { voice.unload() }
             delay(MODEL_HANDOFF_DELAY_MS)
         }
+        lastVoicePlan = calculateVoiceQmxPlan()
+    }
+
+    private fun calculateVoiceQmxPlan(): VoiceQmxPlan {
+        val proof = checkNotNull(lastVoiceProof) { "Voice QMX calibration is unavailable" }
+        val memory = ActivityManager.MemoryInfo()
+        (getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(memory)
+        return planVoiceQmxLayers(
+            availableBytes = memory.availMem,
+            lowMemoryThresholdBytes = memory.threshold,
+            modelBytes = repository.voiceBackboneFile.length() + repository.voiceProjectorFile.length(),
+            probeLayers = proof.layers,
+            probeBufferMiB = proof.bufferMiB,
+            totalLayers = proof.totalLayers,
+        ).also { lastVoicePlan = it }
     }
 
     private suspend fun loadLlmWithHistory() {
@@ -292,7 +389,7 @@ class MainActivity : AppCompatActivity() {
                 val llmFinished = SystemClock.elapsedRealtime()
 
                 val voiceLatency = if (speakSwitch.isChecked) {
-                    synthesizeWithModelHandoff(finalText)
+                    synthesizeWithSelectedVoice(finalText)
                 } else null
                 showTurnMetrics(started, firstTokenAt, llmFinished, voiceLatency)
                 statusBadge.text = getString(R.string.ready_badge)
@@ -314,7 +411,36 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private suspend fun synthesizeWithModelHandoff(text: String): VoiceLatency {
+    private suspend fun synthesizeWithSelectedVoice(text: String): SpeechLatency =
+        when (selectedVoiceBackend) {
+            VoiceBackend.QWEN_QMX -> synthesizeWithModelHandoff(text)
+            VoiceBackend.KITTEN_CPU -> synthesizeWithKitten(text)
+        }
+
+    private suspend fun synthesizeWithKitten(text: String): SpeechLatency {
+        updateBusyMessage(getString(R.string.speaking_kitten))
+        ensureKittenLoaded()
+        val output = File(cacheDir, "assistant-answer-kitten.wav")
+        val result = withContext(Dispatchers.IO) {
+            kittenVoice.synthesize(
+                text = text.take(MAX_SPOKEN_CHARACTERS),
+                output = output,
+            )
+        }
+        session.lastAudioPath = output.absolutePath
+        playAudio(output)
+        return SpeechLatency(
+            backend = VoiceBackend.KITTEN_CPU,
+            firstPcmMs = result.firstPcmMs,
+            totalMs = result.totalMs,
+            audioMs = result.audioMs,
+            realTimeFactor = result.realTimeFactor,
+            threads = result.threads,
+            runtime = result.runtime,
+        )
+    }
+
+    private suspend fun synthesizeWithModelHandoff(text: String): SpeechLatency {
         updateBusyMessage(getString(R.string.unloading_llm))
         assistantReady = false
         lastLlmAcceleration = llm.accelerationInfo()
@@ -326,23 +452,29 @@ class MainActivity : AppCompatActivity() {
         try {
             updateBusyMessage(getString(R.string.speaking))
             voice.activateTelemetry()
+            val plan = calculateVoiceQmxPlan()
+            val threads = preferences.getInt(PREFERRED_THREADS, DEFAULT_TTS_THREADS)
             voice.load(
                 repository.voiceBackboneFile,
                 repository.voiceProjectorFile,
-                threads = 1,
-                qmxLayers = VOICE_QMX_LAYERS,
+                threads = threads,
+                qmxLayers = plan.layers,
             )
             val output = File(cacheDir, "assistant-answer.wav")
+            pcmPlayer?.close()
+            val streamingPlayer = StreamingPcmPlayer().also { pcmPlayer = it }
             result = voice.synthesize(
                 text = text.take(MAX_SPOKEN_CHARACTERS),
                 output = output,
-                threads = 1,
+                threads = threads,
                 maxFrames = MAX_VOICE_FRAMES,
+                pcmChunkListener = streamingPlayer,
             )
             lastVoiceProof = result.qmx
             session.lastAudioPath = output.absolutePath
-            playAudio(output)
         } catch (error: Throwable) {
+            pcmPlayer?.close()
+            pcmPlayer = null
             voiceFailure = error
         } finally {
             updateBusyMessage(getString(R.string.restoring_llm))
@@ -352,7 +484,144 @@ class MainActivity : AppCompatActivity() {
             assistantReady = true
         }
         voiceFailure?.let { throw it }
-        return checkNotNull(result)
+        return checkNotNull(result).let { latency ->
+            SpeechLatency(
+                backend = VoiceBackend.QWEN_QMX,
+                firstPcmMs = latency.firstPcmMs,
+                totalMs = latency.totalMs,
+                audioMs = latency.audioMs,
+                realTimeFactor = latency.realTimeFactor,
+                threads = latency.threads,
+                qmxLayers = latency.qmx.layers,
+                runtime = "llama.cpp · Qualcomm KleidiAI QMX/SME CPU",
+            )
+        }
+    }
+
+    private fun runVoiceBenchmark() {
+        if (!assistantReady || workJob?.isActive == true) return
+        if (selectedVoiceBackend == VoiceBackend.KITTEN_CPU) {
+            runKittenVoiceBenchmark()
+            return
+        }
+        workJob = lifecycleScope.launch {
+            setBusy(getString(R.string.benchmark_preparing))
+            assistantReady = false
+            lastLlmAcceleration = llm.accelerationInfo()
+            var benchmarkSummary: String? = null
+            runCatching {
+                withContext(Dispatchers.IO) { llm.cleanUp() }
+                delay(MODEL_HANDOFF_DELAY_MS)
+                val plan = calculateVoiceQmxPlan()
+                voice.activateTelemetry()
+                voice.load(
+                    repository.voiceBackboneFile,
+                    repository.voiceProjectorFile,
+                    threads = 4,
+                    qmxLayers = plan.layers,
+                )
+                updateBusyMessage(getString(R.string.benchmark_one_thread))
+                val one = voice.synthesize(
+                    VOICE_BENCHMARK_TEXT,
+                    File(cacheDir, "assistant-benchmark-1t.wav"),
+                    threads = 1,
+                    maxFrames = VOICE_BENCHMARK_FRAMES,
+                )
+                updateBusyMessage(getString(R.string.benchmark_four_threads))
+                val four = voice.synthesize(
+                    VOICE_BENCHMARK_TEXT,
+                    File(cacheDir, "assistant-benchmark-4t.wav"),
+                    threads = 4,
+                    maxFrames = VOICE_BENCHMARK_FRAMES,
+                )
+                val selected = fasterTtsThreads(one.realTimeFactor, four.realTimeFactor)
+                preferences.edit { putInt(PREFERRED_THREADS, selected) }
+                lastVoiceProof = if (selected == 4) four.qmx else one.qmx
+                getString(
+                    R.string.benchmark_result,
+                    one.totalMs / 1000.0,
+                    one.realTimeFactor,
+                    four.totalMs / 1000.0,
+                    four.realTimeFactor,
+                    one.realTimeFactor / four.realTimeFactor,
+                    selected,
+                )
+            }.onFailure {
+                showError(getString(R.string.inference_failed, it.message ?: it.javaClass.simpleName))
+            }.onSuccess { benchmarkSummary = it }
+            updateBusyMessage(getString(R.string.restoring_llm))
+            if (voice.isLoaded) withContext(Dispatchers.IO) { voice.unload() }
+            delay(MODEL_HANDOFF_DELAY_MS)
+            runCatching { loadLlmWithHistory() }
+                .onSuccess {
+                    assistantReady = true
+                    statusBadge.text = getString(R.string.ready_badge)
+                    statusText.text = getString(
+                        if (benchmarkSummary == null) R.string.ready else R.string.benchmark_complete,
+                    )
+                    benchmarkSummary?.let { metricsText.text = it }
+                }
+                .onFailure { showError(getString(R.string.load_failed, it.message ?: it.javaClass.simpleName)) }
+            progress.visibility = View.GONE
+            setControlsEnabled(true)
+        }
+    }
+
+    private fun runKittenVoiceBenchmark() {
+        workJob = lifecycleScope.launch {
+            assistantReady = false
+            setBusy(getString(R.string.benchmark_preparing))
+            var benchmarkSummary: String? = null
+            runCatching {
+                suspend fun measure(threads: Int, suffix: String): KittenLatency {
+                    ensureKittenLoaded(threads)
+                    withContext(Dispatchers.IO) {
+                        kittenVoice.synthesize(
+                            VOICE_WARMUP_TEXT,
+                            File(cacheDir, "kitten-warmup-${suffix}.wav"),
+                        )
+                    }
+                    updateBusyMessage(
+                        getString(
+                            if (threads == 1) R.string.benchmark_one_thread
+                            else R.string.benchmark_four_threads,
+                        ),
+                    )
+                    return withContext(Dispatchers.IO) {
+                        kittenVoice.synthesize(
+                            VOICE_BENCHMARK_TEXT,
+                            File(cacheDir, "kitten-benchmark-${suffix}.wav"),
+                        )
+                    }
+                }
+
+                val one = measure(1, "1t")
+                val four = measure(4, "4t")
+                val selected = fasterTtsThreads(one.realTimeFactor, four.realTimeFactor)
+                preferences.edit { putInt(PREFERRED_KITTEN_THREADS, selected) }
+                ensureKittenLoaded(selected)
+                getString(
+                    R.string.benchmark_result,
+                    one.totalMs / 1000.0,
+                    one.realTimeFactor,
+                    four.totalMs / 1000.0,
+                    four.realTimeFactor,
+                    one.realTimeFactor / four.realTimeFactor,
+                    selected,
+                )
+            }.onFailure {
+                showError(getString(R.string.inference_failed, it.message ?: it.javaClass.simpleName))
+            }.onSuccess { benchmarkSummary = it }
+
+            assistantReady = true
+            progress.visibility = View.GONE
+            statusBadge.text = getString(R.string.ready_badge)
+            statusText.text = getString(
+                if (benchmarkSummary == null) R.string.ready else R.string.benchmark_complete,
+            )
+            benchmarkSummary?.let { metricsText.text = it }
+            setControlsEnabled(true)
+        }
     }
 
     private fun clearConversation() {
@@ -384,14 +653,25 @@ class MainActivity : AppCompatActivity() {
         statusText.text = getString(R.string.ready)
         downloadButton.visibility = View.GONE
         setControlsEnabled(true)
-        val voiceStatus = lastVoiceProof ?: voice.qmxStatus()
-        metricsText.text = getString(
-            R.string.runtime_metrics,
-            lastLlmAcceleration.ifBlank { llm.accelerationInfo() },
-            if (voiceStatus.inferenceConfirmed) "proven" else "not proven",
-            voiceStatus.bufferMiB,
-            voiceStatus.layers,
-        )
+        metricsText.text = when (selectedVoiceBackend) {
+            VoiceBackend.KITTEN_CPU -> getString(
+                R.string.kitten_runtime_metrics,
+                kittenVoice.runtimeInfo(),
+            )
+            VoiceBackend.QWEN_QMX -> {
+                val voiceStatus = lastVoiceProof ?: voice.qmxStatus()
+                getString(
+                    R.string.runtime_metrics,
+                    lastLlmAcceleration.ifBlank { llm.accelerationInfo() },
+                    if (voiceStatus.inferenceConfirmed) "proven" else "not proven",
+                    voiceStatus.bufferMiB,
+                    voiceStatus.layers,
+                    preferences.getInt(PREFERRED_THREADS, DEFAULT_TTS_THREADS),
+                    lastVoicePlan?.layers ?: voiceStatus.layers,
+                    voiceStatus.totalLayers,
+                )
+            }
+        }
         playButton.isEnabled = session.lastAudioPath?.let(::File)?.isFile == true
     }
 
@@ -405,25 +685,38 @@ class MainActivity : AppCompatActivity() {
         downloadButton.text = getString(R.string.download_models)
         downloadButton.isEnabled = true
         setControlsEnabled(false)
+        voiceBackendSpinner.isEnabled = true
     }
 
     private fun showTurnMetrics(
         started: Long,
         firstTokenAt: Long,
         llmFinished: Long,
-        voiceLatency: VoiceLatency?,
+        voiceLatency: SpeechLatency?,
     ) {
         val ttft = (firstTokenAt.takeIf { it > 0 } ?: llmFinished) - started
         metricsText.text = if (voiceLatency == null) {
             "LLM TTFT $ttft ms · total ${llmFinished - started} ms"
+        } else if (voiceLatency.backend == VoiceBackend.KITTEN_CPU) {
+            getString(
+                R.string.kitten_turn_metrics,
+                ttft,
+                llmFinished - started,
+                voiceLatency.firstPcmMs,
+                voiceLatency.totalMs / 1000.0,
+                voiceLatency.realTimeFactor,
+                voiceLatency.threads,
+            )
         } else {
             getString(
                 R.string.turn_metrics,
                 ttft,
                 llmFinished - started,
-                voiceLatency.firstFrameMs,
+                voiceLatency.firstPcmMs,
                 voiceLatency.totalMs / 1000.0,
                 voiceLatency.realTimeFactor,
+                voiceLatency.threads,
+                voiceLatency.qmxLayers,
             )
         }
     }
@@ -445,6 +738,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun playAudio(file: File) {
+        pcmPlayer?.close()
+        pcmPlayer = null
         player?.release()
         player = MediaPlayer().apply {
             setDataSource(file.absolutePath)
@@ -475,6 +770,8 @@ class MainActivity : AppCompatActivity() {
         newChatButton.isEnabled = enabled && assistantReady
         speakSwitch.isEnabled = enabled && assistantReady
         playButton.isEnabled = enabled && session.lastAudioPath?.let(::File)?.isFile == true
+        benchmarkButton.isEnabled = enabled && assistantReady
+        voiceBackendSpinner.isEnabled = enabled
     }
 
     private fun showError(message: String) {
@@ -488,6 +785,8 @@ class MainActivity : AppCompatActivity() {
         monitorJob?.cancel()
         workJob?.cancel()
         player?.release()
+        pcmPlayer?.close()
+        kittenVoice.close()
         super.onDestroy()
     }
 
@@ -495,8 +794,10 @@ class MainActivity : AppCompatActivity() {
         private const val QMX_SWITCH = "GGML_KLEIDIAI_SME"
         private const val LLM_QMX_LAYERS_VARIABLE = "QMX_ACCELERATED_LAYERS"
         private const val LLM_QMX_LAYERS = 2
-        private const val VOICE_QMX_LAYERS = 4
+        private const val VOICE_QMX_PROBE_LAYERS = 4
         private const val VOICE_WARMUP_FRAMES = 24
+        private const val VOICE_BENCHMARK_FRAMES = 48
+        private const val DEFAULT_TTS_THREADS = 4
         private const val MAX_RESPONSE_TOKENS = 96
         private const val MAX_VOICE_FRAMES = 160
         private const val MAX_SPOKEN_CHARACTERS = 600
@@ -504,6 +805,11 @@ class MainActivity : AppCompatActivity() {
         private const val DOWNLOAD_POLL_MS = 750L
         private const val MODEL_HANDOFF_DELAY_MS = 350L
         private const val VOICE_WARMUP_TEXT = "Voice assistant ready."
+        private const val VOICE_BENCHMARK_TEXT = "This is a matched voice latency test."
+        private const val VOICE_PREFERENCES = "voice-performance"
+        private const val PREFERRED_THREADS = "preferred-threads"
+        private const val PREFERRED_KITTEN_THREADS = "preferred-kitten-threads"
+        private const val PREFERRED_VOICE_BACKEND = "preferred-voice-backend"
         private const val SYSTEM_PROMPT =
             "You are a concise, helpful voice assistant running privately on this phone. " +
                 "Use short spoken-friendly answers unless the user requests detail."
@@ -512,6 +818,8 @@ class MainActivity : AppCompatActivity() {
         private var assistantReady = false
         @Volatile
         private var lastVoiceProof: VoiceQmxStatus? = null
+        @Volatile
+        private var lastVoicePlan: VoiceQmxPlan? = null
         @Volatile
         private var lastLlmAcceleration = ""
         private val modelLoadMutex = Mutex()

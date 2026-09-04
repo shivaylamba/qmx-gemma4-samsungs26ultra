@@ -10,6 +10,10 @@ $patches = @(
     @{
         Path = Join-Path $projectRoot "patches\llama.cpp-qualcomm-qmx.patch"
         Label = "Qualcomm QMX SME1"
+    },
+    @{
+        Path = Join-Path $projectRoot "patches\llama.cpp-qwen3tts-streaming.patch"
+        Label = "Qwen3-TTS streaming PCM"
     }
 )
 
@@ -20,19 +24,19 @@ if ($LASTEXITCODE -ne 0) {
 
 foreach ($patch in $patches) {
     $ErrorActionPreference = "Continue"
-    git -C $llamaDirectory apply --check $patch.Path *> $null
+    git -C $llamaDirectory apply --unidiff-zero --check $patch.Path *> $null
     $patchCanApply = $LASTEXITCODE -eq 0
     $ErrorActionPreference = "Stop"
 
     if ($patchCanApply) {
-        git -C $llamaDirectory apply $patch.Path
+        git -C $llamaDirectory apply --unidiff-zero $patch.Path
         if ($LASTEXITCODE -ne 0) {
             throw "Could not apply the $($patch.Label) patch."
         }
         Write-Host "Applied the $($patch.Label) patch."
     } else {
         $ErrorActionPreference = "Continue"
-        git -C $llamaDirectory apply --reverse --check $patch.Path *> $null
+        git -C $llamaDirectory apply --unidiff-zero --reverse --check $patch.Path *> $null
         $patchIsApplied = $LASTEXITCODE -eq 0
         $ErrorActionPreference = "Stop"
         if (-not $patchIsApplied) {

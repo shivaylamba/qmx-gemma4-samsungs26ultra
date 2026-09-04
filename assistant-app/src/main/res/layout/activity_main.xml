@@ -77,6 +77,33 @@
             android:textColor="@color/muted"
             android:textSize="12sp" />
 
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:labelFor="@id/voiceBackendSpinner"
+                android:text="@string/voice_backend_label"
+                android:textColor="@color/ink"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <Spinner
+                android:id="@+id/voiceBackendSpinner"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:entries="@array/voice_backends"
+                android:popupBackground="@color/paper"
+                android:spinnerMode="dropdown" />
+        </LinearLayout>
+
         <ProgressBar
             android:id="@+id/progress"
             style="?android:attr/progressBarStyleHorizontal"
@@ -101,6 +128,15 @@
             android:textColor="@color/muted"
             android:textIsSelectable="true"
             android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/benchmarkButton"
+            style="?attr/materialButtonOutlinedStyle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:enabled="false"
+            android:text="@string/benchmark_voice" />
     </LinearLayout>
 
     <ScrollView

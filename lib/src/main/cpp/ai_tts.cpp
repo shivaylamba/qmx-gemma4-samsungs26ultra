@@ -13,6 +13,7 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "common.h"
 #include "ggml-backend.h"
@@ -40,11 +41,35 @@ std::atomic<bool> voice_qmx_gemm_executed(false);
 std::atomic<bool> voice_qmx_gemv_executed(false);
 std::atomic<int> voice_kleidiai_buffer_centimib(0);
 std::atomic<int> voice_layers(0);
+std::atomic<int> voice_total_layers(0);
 
 std::string voice_error;
 
 double elapsed_ms(int64_t start_us, int64_t end_us) {
     return static_cast<double>(end_us - start_us) / 1000.0;
+}
+
+bool emit_pcm_chunk(
+        JNIEnv * env, jobject callback, jmethodID method, const float * pcm,
+        size_t n_samples, int32_t sample_rate, bool is_final) {
+    if (callback == nullptr || method == nullptr) {
+        return true;
+    }
+    std::vector<jshort> pcm16(n_samples);
+    for (size_t i = 0; i < n_samples; ++i) {
+        const float value = std::max(-1.0f, std::min(1.0f, pcm[i]));
+        pcm16[i] = static_cast<jshort>(value * 32767.0f);
+    }
+    jshortArray samples = env->NewShortArray(static_cast<jsize>(n_samples));
+    if (samples == nullptr) {
+        return false;
+    }
+    if (n_samples > 0) {
+        env->SetShortArrayRegion(samples, 0, static_cast<jsize>(n_samples), pcm16.data());
+    }
+    env->CallVoidMethod(callback, method, samples, sample_rate, is_final ? JNI_TRUE : JNI_FALSE);
+    env->DeleteLocalRef(samples);
+    return !env->ExceptionCheck();
 }
 
 void voice_log_callback(enum ggml_log_level level, const char * text, void * user_data) {
@@ -95,9 +120,18 @@ void free_voice_model() {
 }
 
 std::string qmx_status_json() {
-    const bool selected = voice_sme_enabled.load() &&
-                          voice_q8_kernel_selected.load() &&
-                          voice_kleidiai_buffer_centimib.load() > 0;
+    const char * sme_override = std::getenv("GGML_KLEIDIAI_SME");
+    const bool process_sme_selected = voice_sme_enabled.load() &&
+                                      voice_q8_kernel_selected.load();
+    const bool explicit_sme_selected = sme_override != nullptr &&
+                                       std::strcmp(sme_override, "1") == 0;
+    // KleidiAI emits its selection messages once per process. Gemma can consume
+    // those messages before telemetry is switched to the voice engine, so keep
+    // the current voice model's packed buffer plus the explicit SME setting as
+    // the durable selection signal. inferenceConfirmed additionally requires
+    // the QMX-specific GEMM and GEMV execution markers captured below.
+    const bool selected = voice_kleidiai_buffer_centimib.load() > 0 &&
+                          (process_sme_selected || explicit_sme_selected);
     std::ostringstream out;
     out << "{"
         << "\"selected\":" << (selected ? "true" : "false") << ','
@@ -106,6 +140,7 @@ std::string qmx_status_json() {
         << "\"bufferMiB\":" << std::fixed << std::setprecision(2)
         << voice_kleidiai_buffer_centimib.load() / 100.0 << ','
         << "\"layers\":" << voice_layers.load()
+        << ",\"totalLayers\":" << voice_total_layers.load()
         << "}";
     return out.str();
 }
@@ -174,6 +209,7 @@ Java_com_arm_aichat_VoiceInferenceEngine_nativeLoad(
         return 1;
     }
     const int total_layers = static_cast<int>(llama_model_n_layer(voice_model));
+    voice_total_layers.store(total_layers);
     voice_layers.store(requested_qmx_layers > 0
             ? std::min(static_cast<int>(requested_qmx_layers), total_layers)
             : total_layers);
@@ -229,7 +265,7 @@ Java_com_arm_aichat_VoiceInferenceEngine_nativeLoad(
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_arm_aichat_VoiceInferenceEngine_nativeSynthesize(
         JNIEnv * env, jobject, jstring prompt_value, jstring language_value,
-        jstring output_path_value, jint threads, jint max_frames) {
+        jstring output_path_value, jint threads, jint max_frames, jobject pcm_callback) {
     std::lock_guard<std::mutex> lock(voice_mutex);
     if (voice_model == nullptr || voice_context == nullptr || voice_mtmd == nullptr || voice_sampler == nullptr) {
         voice_error = "Load both model files before synthesizing";
@@ -239,6 +275,19 @@ Java_com_arm_aichat_VoiceInferenceEngine_nativeSynthesize(
     const char * prompt = env->GetStringUTFChars(prompt_value, nullptr);
     const char * language = env->GetStringUTFChars(language_value, nullptr);
     const char * output_path = env->GetStringUTFChars(output_path_value, nullptr);
+    jmethodID pcm_callback_method = nullptr;
+    if (pcm_callback != nullptr) {
+        jclass callback_class = env->GetObjectClass(pcm_callback);
+        pcm_callback_method = env->GetMethodID(callback_class, "onPcmChunk", "([SIZ)V");
+        env->DeleteLocalRef(callback_class);
+        if (pcm_callback_method == nullptr) {
+            voice_error = "PCM callback method is unavailable";
+            env->ReleaseStringUTFChars(prompt_value, prompt);
+            env->ReleaseStringUTFChars(language_value, language);
+            env->ReleaseStringUTFChars(output_path_value, output_path);
+            return nullptr;
+        }
+    }
 
     llama_set_n_threads(voice_context, threads, threads);
     llama_memory_clear(llama_get_memory(voice_context), false);
@@ -286,6 +335,7 @@ Java_com_arm_aichat_VoiceInferenceEngine_nativeSynthesize(
     const float * hidden_state = llama_get_embeddings_ith(voice_context, -1);
     int frames = 0;
     int64_t first_frame_us = 0;
+    int64_t first_pcm_us = 0;
     bool stop = false;
     const int frame_limit = max_frames > 0 ? max_frames : DEFAULT_MAX_FRAMES;
 
@@ -305,6 +355,29 @@ Java_com_arm_aichat_VoiceInferenceEngine_nativeSynthesize(
             first_frame_us = ggml_time_us();
         }
         frames++;
+        int32_t chunk_sample_rate = 0;
+        const float * chunk_pcm = nullptr;
+        size_t chunk_samples = 0;
+        if (generator.get_pcm_chunk(&chunk_sample_rate, &chunk_pcm, &chunk_samples) != 0) {
+            voice_error = "Could not read streaming PCM";
+            env->ReleaseStringUTFChars(prompt_value, prompt);
+            env->ReleaseStringUTFChars(language_value, language);
+            env->ReleaseStringUTFChars(output_path_value, output_path);
+            return nullptr;
+        }
+        if (chunk_samples > 0) {
+            if (first_pcm_us == 0) {
+                first_pcm_us = ggml_time_us();
+            }
+            if (!emit_pcm_chunk(env, pcm_callback, pcm_callback_method, chunk_pcm,
+                                chunk_samples, chunk_sample_rate, false)) {
+                voice_error = "PCM playback callback failed";
+                env->ReleaseStringUTFChars(prompt_value, prompt);
+                env->ReleaseStringUTFChars(language_value, language);
+                env->ReleaseStringUTFChars(output_path_value, output_path);
+                return nullptr;
+            }
+        }
         hidden_state = next_hidden_state;
         sampled = common_sampler_sample(voice_sampler, voice_context, -1);
         common_sampler_accept(voice_sampler, sampled, true);
@@ -317,6 +390,22 @@ Java_com_arm_aichat_VoiceInferenceEngine_nativeSynthesize(
     int64_t sample_count = 0;
     if (generator.get_output(&sample_rate, &wav_data, &wav_size, &sample_count) != 0 || wav_data == nullptr) {
         voice_error = "Could not assemble the output WAV";
+        env->ReleaseStringUTFChars(prompt_value, prompt);
+        env->ReleaseStringUTFChars(language_value, language);
+        env->ReleaseStringUTFChars(output_path_value, output_path);
+        return nullptr;
+    }
+    const float * final_pcm = nullptr;
+    size_t final_samples = 0;
+    int32_t final_sample_rate = 0;
+    const int pcm_status = generator.get_pcm_chunk(&final_sample_rate, &final_pcm, &final_samples);
+    if (first_pcm_us == 0 && final_samples > 0) {
+        first_pcm_us = ggml_time_us();
+    }
+    if (pcm_status != 0 ||
+        !emit_pcm_chunk(env, pcm_callback, pcm_callback_method, final_pcm, final_samples,
+                        final_sample_rate > 0 ? final_sample_rate : sample_rate, true)) {
+        voice_error = "Could not finish streaming PCM";
         env->ReleaseStringUTFChars(prompt_value, prompt);
         env->ReleaseStringUTFChars(language_value, language);
         env->ReleaseStringUTFChars(output_path_value, output_path);
@@ -350,6 +439,7 @@ Java_com_arm_aichat_VoiceInferenceEngine_nativeSynthesize(
            << "{"
            << "\"promptMs\":" << prompt_ms << ','
            << "\"firstFrameMs\":" << first_frame_ms << ','
+           << "\"firstPcmMs\":" << (first_pcm_us > 0 ? elapsed_ms(start_us, first_pcm_us) : 0.0) << ','
            << "\"generationMs\":" << generation_ms << ','
            << "\"wavMs\":" << wav_ms << ','
            << "\"totalMs\":" << total_ms << ','

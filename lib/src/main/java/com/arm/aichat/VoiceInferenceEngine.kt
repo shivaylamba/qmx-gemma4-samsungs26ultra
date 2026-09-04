@@ -13,6 +13,7 @@ data class VoiceQmxStatus(
     val gemvExecuted: Boolean,
     val bufferMiB: Double,
     val layers: Int,
+    val totalLayers: Int,
 ) {
     val inferenceConfirmed: Boolean
         get() = selected && gemmExecuted && gemvExecuted
@@ -21,6 +22,7 @@ data class VoiceQmxStatus(
 data class VoiceLatency(
     val promptMs: Double,
     val firstFrameMs: Double,
+    val firstPcmMs: Double,
     val generationMs: Double,
     val wavMs: Double,
     val totalMs: Double,
@@ -31,6 +33,10 @@ data class VoiceLatency(
     val threads: Int,
     val qmx: VoiceQmxStatus,
 )
+
+fun interface PcmChunkListener {
+    fun onPcmChunk(samples: ShortArray, sampleRate: Int, isFinal: Boolean)
+}
 
 class VoiceInferenceEngine private constructor(context: Context) {
     private val nativeLibDir = context.applicationInfo.nativeLibraryDir
@@ -55,6 +61,7 @@ class VoiceInferenceEngine private constructor(context: Context) {
         outputPath: String,
         threads: Int,
         maxFrames: Int,
+        pcmChunkListener: PcmChunkListener?,
     ): String?
     private external fun nativeQmxStatus(): String
     private external fun nativeActivateTelemetry()
@@ -97,11 +104,19 @@ class VoiceInferenceEngine private constructor(context: Context) {
         threads: Int,
         language: String = "en",
         maxFrames: Int = 240,
+        pcmChunkListener: PcmChunkListener? = null,
     ): VoiceLatency = withContext(Dispatchers.IO) {
         check(loaded) { "Load the model before synthesizing" }
         require(text.isNotBlank()) { "Enter text to speak" }
         output.parentFile?.mkdirs()
-        val raw = nativeSynthesize(text, language, output.absolutePath, threads, maxFrames)
+        val raw = nativeSynthesize(
+            text,
+            language,
+            output.absolutePath,
+            threads,
+            maxFrames,
+            pcmChunkListener,
+        )
             ?: error(nativeLastError().ifBlank { "Voice synthesis failed" })
         parseLatency(JSONObject(raw))
     }
@@ -122,6 +137,7 @@ class VoiceInferenceEngine private constructor(context: Context) {
     private fun parseLatency(json: JSONObject) = VoiceLatency(
         promptMs = json.getDouble("promptMs"),
         firstFrameMs = json.getDouble("firstFrameMs"),
+        firstPcmMs = json.optDouble("firstPcmMs", json.getDouble("totalMs")),
         generationMs = json.getDouble("generationMs"),
         wavMs = json.getDouble("wavMs"),
         totalMs = json.getDouble("totalMs"),
@@ -139,6 +155,7 @@ class VoiceInferenceEngine private constructor(context: Context) {
         gemvExecuted = json.getBoolean("gemvExecuted"),
         bufferMiB = json.getDouble("bufferMiB"),
         layers = json.getInt("layers"),
+        totalLayers = json.optInt("totalLayers", json.getInt("layers")),
     )
 
     companion object {
