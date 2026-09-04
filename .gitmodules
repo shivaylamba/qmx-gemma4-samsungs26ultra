@@ -2,7 +2,3 @@
 	path = third_party/llama.cpp-current
 	url = https://github.com/ggml-org/llama.cpp.git
 	ignore = dirty
-[submodule "third_party/kleidiai-qmx"]
-	path = third_party/kleidiai-qmx
-	url = https://github.com/qualcomm/kleidiai.git
-	branch = kleidi-ai-qmx

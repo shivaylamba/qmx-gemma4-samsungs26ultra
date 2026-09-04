@@ -1,0 +1,134 @@
+diff --git a/tools/mtmd/clip.cpp b/tools/mtmd/clip.cpp
+index b9dd5e845..d7bed48c8 100644
+--- a/tools/mtmd/clip.cpp
++++ b/tools/mtmd/clip.cpp
+@@ -5091,7 +5091,7 @@ bool clip_encode(struct clip_ctx * ctx, struct clip_encode_params * params) {
+ 
+                     // frame-major input to group-major, rear-padded with code 0 up to one window
+                     const int64_t n_codes  = model.gen_code_head_w->ne[2] + 1;
+-                    const int64_t n_frames_w = hparams.wav_tfm_swa;
++                    const int64_t n_frames_w = get_inp_tensor("inp_codes")->ne[0];
+                     const int64_t n_frames   = (int64_t) params->codes->size() / n_codes;
+                     GGML_ASSERT(n_frames > 0 && n_frames <= n_frames_w);
+ 
+@@ -5630,7 +5630,8 @@ bool clip_encode(struct clip_ctx * ctx, struct clip_encode_params * params) {
+ 
+         // drop the tail audio that comes from the code-0 rear padding
+         const int64_t n_codes    = params->codes ? model.gen_code_head_w->ne[2] + 1 : 0;
+-        const int64_t n_frames_w = hparams.wav_tfm_swa;
++        const ggml_tensor * inp_codes = ggml_graph_get_tensor(gf, "inp_codes");
++        const int64_t n_frames_w = inp_codes ? inp_codes->ne[0] : hparams.wav_tfm_swa;
+         const int64_t n_frames   = params->codes ? (int64_t) params->codes->size() / n_codes : n_frames_w;
+         if (n_frames < n_frames_w) {
+             const size_t hop = out_audio.size() / n_frames_w;
+diff --git a/tools/mtmd/models/qwen3tts-gen.cpp b/tools/mtmd/models/qwen3tts-gen.cpp
+index 84c77f4fa..6e3a1704f 100644
+--- a/tools/mtmd/models/qwen3tts-gen.cpp
++++ b/tools/mtmd/models/qwen3tts-gen.cpp
+@@ -419,7 +419,7 @@ ggml_tensor * clip_graph_qwen3tts_gen::code2wav::tfm_layer_forward(ggml_tensor
+     const int     n_head_kv = hparams.wav_tfm_n_head_kv;
+     const int64_t d_head    = layer.q_w->ne[1] / n_head;
+     const float   kq_scale  = 1.0f / sqrtf((float) d_head);
+-    const int64_t W         = hparams.wav_tfm_swa; // == N, frames per batch
++    const int64_t W         = hparams.wav_tfm_swa; // attention window
+     const int64_t N         = cur->ne[1];
+     const int64_t prefix    = W - 1;
+     const int64_t total_kv  = prefix + N;
+@@ -732,7 +732,7 @@ ggml_cgraph * clip_graph_qwen3tts_gen::build() {
+     cb(out_embd, "gen_audio_out", -1);
+ 
+     // ---- CLIP_GEN_PROCESS_GEN_WAV: 16 RVQ codes -> raw PCM ----
+-    const int n_frames = hparams.wav_tfm_swa; // frames per batch, == the attention window
++    const int n_frames = 12;
+ 
+     ggml_tensor * inp_codes = ggml_new_tensor_2d(ctx0, GGML_TYPE_I32, n_frames, n_codes);
+     ggml_set_name(inp_codes, "inp_codes");
+diff --git a/tools/mtmd/mtmd-helper-gen.cpp b/tools/mtmd/mtmd-helper-gen.cpp
+index 1c58d3ae1..abc77e883 100644
+--- a/tools/mtmd/mtmd-helper-gen.cpp
++++ b/tools/mtmd/mtmd-helper-gen.cpp
+@@ -92,6 +92,7 @@ public:
+     // set out_stop on end-of-speech, h_state_out must be null if no frame is generated
+     virtual int32_t step_gen(llama_token sampled, const float * h_state_in, const float ** h_state_out, bool * out_stop) = 0;
+     virtual int32_t get_output(int32_t * out_sample_rate, const char ** out_data, size_t * out_data_len, int64_t * out_n_samples) = 0;
++    virtual int32_t get_pcm_chunk(int32_t *, const float **, size_t *) { return 1; }
+ 
+ protected:
+     llama_context * lctx;
+@@ -114,6 +115,7 @@ public:
+         codes_buf.clear();
+         c2w_state.clear();
+         audio_pcm.clear();
++        emitted_pcm = 0;
+         overlay.clear();
+         h_state_buf.clear();
+         out_buf.clear();
+@@ -327,6 +329,14 @@ public:
+         return 0;
+     }
+ 
++    int32_t get_pcm_chunk(int32_t * out_sample_rate, const float ** out_data, size_t * out_n_samples) override {
++        *out_sample_rate = info.sample_rate;
++        *out_n_samples = audio_pcm.size() - emitted_pcm;
++        *out_data = *out_n_samples > 0 ? audio_pcm.data() + emitted_pcm : nullptr;
++        emitted_pcm = audio_pcm.size();
++        return 0;
++    }
++
+ private:
+     bool ensure_cache() {
+         if (specials_ok) {
+@@ -437,2 +447,2 @@ private:
+-    // must match hparams.wav_tfm_swa hardcoded in clip.cpp
+-    size_t window_frames = 72;
++    // codec frames decoded per streaming PCM chunk
++    size_t window_frames = 12;
+@@ -452,6 +462,7 @@ private:
+     std::vector<int32_t> codes_buf;
+     std::vector<uint8_t> c2w_state;
+     std::vector<float>   audio_pcm;
++    size_t emitted_pcm = 0;
+     std::vector<float> overlay;
+     std::vector<float> h_state_buf;
+     mtmd_helper_gen_audio_outtype out_type = MTMD_HELPER_GEN_AUDIO_OUTTYPE_WAV;
+@@ -1060,3 +1071,11 @@ int32_t mtmd_helper_gen_audio_get_output(mtmd_helper_gen_audio * ctx, int32_t *
+     }
+     return ctx->pipeline->get_output(out_sample_rate, out_data, out_data_len, out_n_samples);
+ }
++
++int32_t mtmd_helper_gen_audio_get_pcm_chunk(mtmd_helper_gen_audio * ctx, int32_t * out_sample_rate,
++                                            const float ** out_data, size_t * out_n_samples) {
++    if (!ctx->pipeline) {
++        return 1;
++    }
++    return ctx->pipeline->get_pcm_chunk(out_sample_rate, out_data, out_n_samples);
++}
+diff --git a/tools/mtmd/mtmd-helper.h b/tools/mtmd/mtmd-helper.h
+index 5c6b92419..9b3faaca3 100644
+--- a/tools/mtmd/mtmd-helper.h
++++ b/tools/mtmd/mtmd-helper.h
+@@ -228,6 +228,14 @@ MTMD_API int32_t mtmd_helper_gen_audio_get_output(
+                         size_t * out_data_len,
+                         int64_t * out_n_samples);
+ 
++// returns PCM produced since the previous call without flushing partial decoder input
++// out_data is valid until the next step_gen(), get_output(), or reset() call
++MTMD_API int32_t mtmd_helper_gen_audio_get_pcm_chunk(
++                        mtmd_helper_gen_audio * ctx,
++                        int32_t * out_sample_rate,
++                        const float ** out_data,
++                        size_t * out_n_samples);
++
+ #ifdef __cplusplus
+ } // extern "C"
+ #endif
+@@ -271,6 +279,9 @@ struct gen_audio {
+     int32_t get_output(int32_t * out_sample_rate, const char ** out_data, size_t * out_data_len, int64_t * out_n_samples = nullptr) {
+         return mtmd_helper_gen_audio_get_output(ctx.get(), out_sample_rate, out_data, out_data_len, out_n_samples);
+     }
++    int32_t get_pcm_chunk(int32_t * out_sample_rate, const float ** out_data, size_t * out_n_samples) {
++        return mtmd_helper_gen_audio_get_pcm_chunk(ctx.get(), out_sample_rate, out_data, out_n_samples);
++    }
+ };
+ 
+ } // namespace mtmd_helper

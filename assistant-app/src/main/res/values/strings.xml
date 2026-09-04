@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">QMX Voice Assistant</string>
+    <string name="title">QMX Voice Assistant</string>
+    <string name="subtitle">Compare QMX speech with a lightweight ONNX CPU voice</string>
+    <string name="starting">Starting native runtimes</string>
+    <string name="models_needed">Models required</string>
+    <string name="model_summary">Gemma 4 E2B Q8 + Qwen3-TTS Q8 + KittenTTS Nano FP32 · 7.32 GB</string>
+    <string name="voice_backend_label">Voice model</string>
+    <string-array name="voice_backends">
+        <item>Qwen3-TTS 1.7B · Qualcomm QMX/SME CPU</item>
+        <item>KittenTTS Nano 0.8 FP32 · ONNX CPU</item>
+    </string-array>
+    <string name="download_models">Download all models</string>
+    <string name="cancel_download">Cancel download</string>
+    <string name="download_progress">Downloading %1$d%% · %2$s / %3$s</string>
+    <string name="verifying">Verifying model checksums</string>
+    <string name="loading_voice">Calibrating the Qwen3-TTS QMX memory budget</string>
+    <string name="loading_kitten">Loading KittenTTS with the ONNX CPU provider</string>
+    <string name="warming_voice">Proving QMX execution with a short voice warm-up</string>
+    <string name="loading_llm">Loading Gemma with a two-block QMX budget</string>
+    <string name="ready">Ready for private voice chat · Gemma resident</string>
+    <string name="voice_backend_ready">Voice backend selected: %1$s</string>
+    <string name="ready_badge">READY</string>
+    <string name="waiting_badge">SETUP</string>
+    <string name="error_badge">ERROR</string>
+    <string name="prompt_hint">Ask the assistant</string>
+    <string name="send">Send</string>
+    <string name="speak_answers">Speak answers automatically</string>
+    <string name="play_last">Play last answer</string>
+    <string name="new_chat">New chat</string>
+    <string name="benchmark_voice">Benchmark selected voice: 1 vs 4 threads</string>
+    <string name="benchmark_preparing">Preparing the voice optimization test</string>
+    <string name="benchmark_one_thread">Benchmarking voice with one thread</string>
+    <string name="benchmark_four_threads">Benchmarking voice with four threads</string>
+    <string name="benchmark_complete">Voice thread optimization complete</string>
+    <string name="thinking">Gemma is thinking on device</string>
+    <string name="speaking">Qwen3-TTS is synthesizing the answer</string>
+    <string name="speaking_kitten">KittenTTS is synthesizing on the CPU</string>
+    <string name="unloading_llm">Freeing Gemma memory before speech</string>
+    <string name="restoring_llm">Freeing voice memory and restoring Gemma</string>
+    <string name="answer_ready">Answer and audio are ready</string>
+    <string name="answer_text_ready">Answer is ready</string>
+    <string name="assistant_placeholder">Preparing a response…</string>
+    <string name="welcome">Download the model files, choose Qwen QMX or Kitten ONNX CPU, then ask a question. Kitten can remain beside Gemma; Qwen uses a memory-safe model handoff.</string>
+    <string name="download_failed">Model download failed: %1$s</string>
+    <string name="load_failed">Model setup failed: %1$s</string>
+    <string name="inference_failed">Inference failed: %1$s</string>
+    <string name="conversation_cleared">Conversation cleared.</string>
+    <string name="runtime_metrics">LLM: %1$s\nVoice proof: QMX %2$s · probe %3$.0f MiB / %4$d-block sample\nVoice plan: QMX %6$d/%7$d · TTS %5$dT · streaming PCM</string>
+    <string name="turn_metrics">LLM TTFT %1$d ms · total %2$d ms\nTTS first playable PCM %3$.0f ms · full %4$.2f s · RTF %5$.2f\nTTS runtime: %6$dT · QMX %7$d-block plan</string>
+    <string name="benchmark_result">Matched voice benchmark\n1T: %1$.2f s · RTF %2$.2f\n4T: %3$.2f s · RTF %4$.2f\nNormalized 4T speedup: %5$.2fx · selected: %6$dT</string>
+    <string name="kitten_runtime_metrics">Voice: %1$s\nKittenTTS Nano 0.8 FP32 · Jasper · 24 kHz\nCPU only: no QNN, NNAPI, GPU, or XNNPACK provider; bypasses llama.cpp/QMX</string>
+    <string name="kitten_turn_metrics">LLM TTFT %1$d ms · total %2$d ms\nKitten first playable PCM %3$.0f ms · full %4$.2f s · RTF %5$.2f\nTTS runtime: ONNX CPU · %6$dT</string>
+</resources>

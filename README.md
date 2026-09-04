@@ -89,6 +89,135 @@ an explicit layer count through ADB.
 The Gradle wrapper downloads Gradle 8.14.3. Android and Kotlin plugin versions
 are pinned in `gradle/libs.versions.toml`.
 
+## QMX Voice Lab APK
+
+This repository also contains a separate `voice-app` application for testing
+on-device text-to-speech latency. It uses llama.cpp's first-class Qwen3-TTS
+pipeline with these files from
+[`ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF`](https://huggingface.co/ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF):
+
+- `Qwen3-TTS-12Hz-1.7B-Base-Q8_0.gguf`, 1,847,874,400 bytes
+- `mmproj-Qwen3-TTS-12Hz-1.7B-Base-Q8_0.gguf`, 446,422,912 bytes
+
+The model files are not packaged in the APK. The app downloads both files from
+Hugging Face, checks their exact sizes and SHA-256 hashes, and keeps them in
+app-specific storage. The downloader resumes partial files and remains attached
+when Android recreates the Activity. Raw `adb push` or `run-as` copies into this
+directory are not a supported installation method because Android 16 scoped
+storage can expose a different mount view to the application. Use the in-app
+download flow for a reproducible installation.
+
+Build and install the voice APK:
+
+```powershell
+$env:JAVA_HOME = "C:\path\to\jdk-21"
+.\gradlew.bat :voice-app:assembleDebug
+adb install -r .\voice-app\build\outputs\apk\debug\voice-app-debug.apk
+```
+
+The app provides single synthesis runs and a matched 1-thread versus 4-thread
+comparison. It reports prompt prefill, the first generated audio-frame proxy,
+time until the complete WAV is available, audio duration, and real-time factor.
+This standalone voice lab still plays the completed WAV. The combined assistant
+described below uses the repository's incremental PCM callback instead.
+
+QMX coverage is deliberately reported per stage. Every transformer block in
+the Q8_0 backbone is targeted dynamically by tensor name, without a hard-coded
+layer count. The published backbone reports architecture `qwen3tts`, 28 blocks,
+196 two-dimensional Q8_0 block-weight tensors, and 112 F32 block vectors. QMX
+can accept the eligible Q8_0 matrix operations; F32 normalization vectors and
+unsupported operations follow ordinary CPU paths. A successful test must
+observe all of the following at runtime:
+
+```text
+kleidiai: primary q8 kernel feature SME
+load_tensors: CPU_KLEIDIAI model buffer size = ...
+kleidiai: executing Qualcomm QMX Q8 SME1 GEMM/prefill kernel (...)
+kleidiai: executing Qualcomm QMX Q8 SME1 GEMV/decode kernel (...)
+```
+
+The Q8 backbone's eligible linear matrix operations can use QMX. The audio
+projector and waveform decoder are loaded by `libmtmd` and currently remain on
+ordinary CPU paths, as do sampling and non-matrix operators. The UI distinguishes
+QMX selection from actual GEMM and GEMV execution so a fallback cannot appear as
+a successful QMX result.
+
+## Combined QMX Voice Assistant APK
+
+The `assistant-app` module combines Gemma 4 E2B chat with two selectable speech
+backends in one Kotlin application:
+
+- **Qwen3-TTS Q8** runs through llama.cpp and Qualcomm KleidiAI. Supported Q8
+  linear operations use the QMX/SME CPU kernels, while the projector, decoder,
+  and unsupported operations use ordinary CPU paths.
+- **KittenTTS Nano 0.8 FP32** runs through ONNX Runtime 1.29.0. Its session
+  explicitly registers `CPUExecutionProvider` and does not register QNN, NNAPI,
+  GPU, or XNNPACK. This is a Snapdragon CPU comparison path, not a QMX path.
+
+The voice selector persists the user's choice. The benchmark button performs a
+matched warm-up and measured synthesis at one and four threads for whichever
+voice is selected, then saves the faster thread setting. The tested Kitten path
+uses the Jasper voice at 24 kHz and returns a complete waveform before playback.
+
+Gemma and the Qwen Q8 model are deliberately not resident at the same time. A co-resident
+device experiment was terminated by Android's low-memory killer after swap
+usage reached roughly 8.3 GB. The production coordinator therefore performs a
+sequential handoff:
+
+1. Gemma generates the text response.
+2. Gemma and its QMX-packed buffer are unloaded and the native heap is purged.
+3. Qwen3-TTS loads, synthesizes and begins PCM playback as decoder chunks become
+   available, then unloads and purges after completing the WAV.
+4. Gemma reloads with a bounded textual reconstruction of the conversation so
+   follow-up questions retain context.
+
+Kitten is only about 60 MB of downloaded model and voice data, so its ONNX CPU
+session remains resident beside Gemma. Selecting Kitten therefore avoids the
+Gemma-to-Qwen unload/reload handoff while preserving Gemma conversation state.
+
+This build assigns two Gemma blocks to the `CPU_KLEIDIAI` buffer. For Qwen3-TTS,
+it first proves QMX with a four-block probe, measures the actual packed MiB per
+block, reads Android's currently available memory, keeps explicit system and
+runtime reserves, and selects the largest safe block count dynamically. This is
+a memory budget, not a claim that every operation in a selected block uses QMX.
+Unsupported tensors and operators continue on ordinary CPU paths. Startup
+requires runtime evidence for both the QMX GEMM/prefill and GEMV/decode entry
+points before it reports the voice path as proven.
+
+For Qwen, the **Benchmark selected voice** button uses the same text, seed, QMX
+plan, and frame cap and compares real-time factor so small output-duration
+differences do not bias the selection. Its first-playable latency is measured
+when the first PCM chunk is emitted. For Kitten, the same button creates explicit
+one-thread and four-thread ONNX CPU sessions and compares their real-time factors;
+because this ONNX graph returns the complete waveform, first-playable latency is
+currently the completed-WAV latency.
+
+Build and install the combined APK:
+
+```powershell
+$env:JAVA_HOME = "C:\path\to\jdk-21"
+.\gradlew.bat :assistant-app:testDebugUnitTest :assistant-app:lintDebug :assistant-app:assembleDebug
+adb install -r .\assistant-app\build\outputs\apk\debug\assistant-app-debug.apk
+adb shell am start -n com.example.qmxassistant/.MainActivity
+```
+
+The APK is only the application and native runtimes. It packages the QMX-enabled
+llama.cpp/KleidiAI libraries, ONNX Runtime, and the Kitten phonemizer, but no
+model weights. After installation the app downloads and SHA-256 verifies
+7.32 GB in app-specific external storage:
+
+- Gemma 4 E2B Q8 GGUF: 4,967,497,152 bytes
+- Qwen3-TTS Q8 backbone and projector GGUFs: 2,294,297,312 bytes combined
+- KittenTTS Nano 0.8 FP32 ONNX and voices: 60,045,997 bytes combined
+- pinned English phonemizer rule/list data: 264,479 bytes combined
+
+The Kitten model is pinned to Hugging Face revision
+`7a1db645b1f3ab9420761d87428e042b9cec3f26`; its native phonemizer source is
+pinned to KittenML's Apache-2.0 Flutter implementation at commit
+`00d8286ff51409387c5e1c15eb3057506280334a`. The phonemizer dictionaries are
+pinned to espeak-ng commit `59eb19938f12e30881c81d86ce4a7de25414c9f4`.
+Uninstalling the app removes the downloaded files.
+
 ## Clone and prepare
 
 ```powershell
@@ -97,10 +226,12 @@ cd qmx-gemma4-samsungs26ultra
 powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1
 ```
 
-The setup script initializes the pinned upstream llama.cpp and Qualcomm
-KleidiAI QMX submodules. It idempotently applies both app-owned patches from
-`patches/`: the QMX SME1 kernel binding and the small Gemma
-`enable_thinking=false` template change.
+The setup script initializes the pinned upstream llama.cpp submodule. The QMX
+patch makes llama.cpp download the pinned Qualcomm KleidiAI commit directly.
+The script idempotently applies three app-owned patches from `patches/`: the
+QMX SME1 kernel binding, the small Gemma
+`enable_thinking=false` template change, and the Qwen3-TTS incremental PCM
+decoder interface.
 
 If Android Studio has not created `local.properties`, create it with your SDK
 path, for example:

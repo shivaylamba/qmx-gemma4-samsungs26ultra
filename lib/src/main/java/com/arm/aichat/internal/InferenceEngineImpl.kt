@@ -98,6 +98,9 @@ internal class InferenceEngineImpl private constructor(
     private external fun nativeQmxRuntimeStats(): LongArray
 
     @FastNative
+    private external fun nativeActivateTelemetry()
+
+    @FastNative
     private external fun benchModel(pp: Int, tg: Int, pl: Int, nr: Int, threads: Int): String
 
     @FastNative
@@ -220,6 +223,8 @@ internal class InferenceEngineImpl private constructor(
         }
 
     override fun accelerationInfo(): String = nativeAccelerationInfo()
+
+    override fun activateTelemetry() = nativeActivateTelemetry()
 
     override fun qmxRuntimeStats(): QmxRuntimeStats {
         val values = nativeQmxRuntimeStats()

@@ -36,6 +36,9 @@ interface InferenceEngine {
     /** Structured QMX measurements from the most recently loaded model. */
     fun qmxRuntimeStats(): QmxRuntimeStats
 
+    /** Makes this engine the recipient of process-wide llama.cpp telemetry. */
+    fun activateTelemetry()
+
     /** Clears native chat history and the KV cache, then restores the system prompt. */
     suspend fun resetConversation()
 

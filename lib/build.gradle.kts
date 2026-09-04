@@ -30,11 +30,14 @@ android {
                 arguments += "-DBUILD_SHARED_LIBS=ON"
                 arguments += "-DLLAMA_BUILD_COMMON=ON"
                 arguments += "-DLLAMA_OPENSSL=OFF"
+                arguments += "-DLLAMA_BUILD_MTMD=ON"
 
                 arguments += "-DGGML_NATIVE=OFF"
                 arguments += "-DGGML_BACKEND_DL=ON"
                 arguments += "-DGGML_CPU_ALL_VARIANTS=ON"
                 arguments += "-DGGML_LLAMAFILE=OFF"
+                arguments += "-DKLEIDIAI_BUILD_TESTS=OFF"
+                arguments += "-DKLEIDIAI_BUILD_BENCHMARK=OFF"
             }
         }
         aarMetadata {

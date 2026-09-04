@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.31.6)
 
 project("ai-chat" VERSION 1.0.0 LANGUAGES C CXX)
 
+include(FetchContent)
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED true)
 
@@ -31,25 +33,29 @@ if(DEFINED ANDROID_ABI)
 endif()
 
 set(LLAMA_SRC ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/llama.cpp-current)
-set(QUALCOMM_KLEIDIAI_QMX_SRC ${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/kleidiai-qmx)
 if(GGML_CPU_KLEIDIAI)
-    if(NOT EXISTS "${QUALCOMM_KLEIDIAI_QMX_SRC}/kai/kai_common.h")
-        message(FATAL_ERROR
-            "Qualcomm KleidiAI QMX sources are missing. Run: git submodule update --init --recursive")
-    endif()
-
-    # llama.cpp obtains KleidiAI through FetchContent. This standard override
-    # replaces its upstream release archive with our pinned Qualcomm QMX
-    # submodule without relying on a machine-specific absolute path.
-    set(FETCHCONTENT_SOURCE_DIR_KLEIDIAI_DOWNLOAD
-        "${QUALCOMM_KLEIDIAI_QMX_SRC}" CACHE PATH
-        "Pinned Qualcomm KleidiAI QMX source tree" FORCE)
-    message(STATUS "Using Qualcomm KleidiAI QMX: ${QUALCOMM_KLEIDIAI_QMX_SRC}")
+    set(KLEIDIAI_BUILD_TESTS OFF CACHE BOOL "Do not build KleidiAI tests in the APK" FORCE)
+    set(KLEIDIAI_BUILD_BENCHMARK OFF CACHE BOOL "Do not build KleidiAI benchmarks in the APK" FORCE)
+    # llama.cpp owns the KleidiAI FetchContent declaration. Its patched
+    # ggml-cpu CMake file downloads the pinned Qualcomm QMX commit.
+    unset(FETCHCONTENT_SOURCE_DIR_KLEIDIAI_DOWNLOAD CACHE)
 endif()
 add_subdirectory(${LLAMA_SRC} build-llama)
 
+# KittenML's Apache-2.0 CE phonemizer is used to prepare IPA tokens for the
+# KittenTTS ONNX model. Pin both the source revision and archive digest so the
+# Android build is reproducible and does not silently pick up upstream changes.
+FetchContent_Declare(kittentts_phonemizer
+        URL https://github.com/KittenML/KittenTTS-flutter/archive/00d8286ff51409387c5e1c15eb3057506280334a.tar.gz
+        URL_HASH SHA256=a12783fdd7dd7edb4794a2c7ae9a34ce77613a9590a62e5acdd8944d798aff4d)
+FetchContent_MakeAvailable(kittentts_phonemizer)
+set(KITTENTTS_PHONEMIZER_SRC ${kittentts_phonemizer_SOURCE_DIR}/src/cephonemizer)
+
 add_library(${CMAKE_PROJECT_NAME} SHARED
-        ai_chat.cpp)
+        ai_chat.cpp
+        ai_tts.cpp
+        kitten_phonemizer_jni.cpp
+        ${KITTENTTS_PHONEMIZER_SRC}/phonemizer.cpp)
 
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
         GGML_SYSTEM_ARCH=${GGML_SYSTEM_ARCH}
@@ -62,10 +68,13 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
         ${LLAMA_SRC}/common
         ${LLAMA_SRC}/include
         ${LLAMA_SRC}/ggml/include
-        ${LLAMA_SRC}/ggml/src)
+        ${LLAMA_SRC}/ggml/src
+        ${LLAMA_SRC}/tools/mtmd
+        ${KITTENTTS_PHONEMIZER_SRC})
 
 target_link_libraries(${CMAKE_PROJECT_NAME}
         llama
         llama-common
+        mtmd
         android
         log)
