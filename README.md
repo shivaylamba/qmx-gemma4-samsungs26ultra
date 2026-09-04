@@ -1,38 +1,108 @@
-# QMX Gemma 4 E2B for Samsung Galaxy S26 Ultra
+# On-device QMX AI Lab for Samsung Galaxy S26 Ultra
 
-A Kotlin Android chat app that runs **Gemma 4 E2B Instruct Q8_0** locally with
-`llama.cpp` and the **CPU KleidiAI SME/QMX path** on a Samsung Galaxy S26 Ultra.
-Prompts, conversation history, and model inference remain on the phone.
+[![Platform](https://img.shields.io/badge/platform-Android%2013%2B-3DDC84?logo=android&logoColor=white)](https://developer.android.com/)
+[![Device](https://img.shields.io/badge/tested-Samsung%20SM--S948B-1428A0)](https://www.samsung.com/)
+[![CPU](https://img.shields.io/badge/CPU-Snapdragon%20SM8850-3253DC)](https://www.qualcomm.com/snapdragon)
+[![Acceleration](https://img.shields.io/badge/acceleration-QMX%20%2F%20SME1-F26B38)](https://github.com/qualcomm/kleidiai/tree/kleidi-ai-qmx)
+[![Engine](https://img.shields.io/badge/engine-llama.cpp%20%2B%20KleidiAI-6C5CE7)](https://github.com/ggml-org/llama.cpp)
+[![Releases](https://img.shields.io/badge/download-APK-2EA44F?logo=github)](https://github.com/shivaylamba/qmx-gemma4-samsungs26ultra/releases)
+
+A developer-focused Android project for running chat and speech models locally
+on the Snapdragon CPU. It combines **Gemma 4 E2B**, **Qwen3-TTS**, Qualcomm's
+**KleidiAI QMX/SME1 kernels**, and a **KittenTTS ONNX CPU** comparison backend.
+Prompts, conversation history, inference, synthesis, and audio playback remain
+on the phone.
+
+> [!IMPORTANT]
+> QMX is CPU acceleration in this project. It is not the Qualcomm NPU or a QNN
+> backend. Gemma and the supported Qwen Q8 linear operations use the
+> llama.cpp/KleidiAI QMX path. KittenTTS deliberately bypasses QMX and uses ONNX
+> Runtime's explicit CPU execution provider so developers can compare both CPU
+> approaches in the same application.
+
+## App preview
+
+<p align="center">
+  <img src="qmx-multiturn.png" width="320" alt="Gemma multi-turn conversation with QMX active">
+  <img src="qmx-keyboard.png" width="320" alt="Keyboard-safe Android chat composer">
+</p>
+
+<p align="center"><em>Real screenshots from the tested Samsung device. The app reports runtime evidence rather than displaying a build-time QMX claim.</em></p>
+
+## What is included
+
+| Android module | Experience | Model and runtime |
+|---|---|---|
+| `app` | Private multi-turn text chat and QMX benchmark harness | Gemma 4 E2B Q8_0, llama.cpp, Qualcomm KleidiAI QMX |
+| `voice-app` | Standalone speech latency laboratory | Qwen3-TTS 1.7B Q8_0, llama.cpp, Qualcomm KleidiAI QMX |
+| `assistant-app` | Gemma chat with a selectable voice backend | Qwen3-TTS QMX or KittenTTS Nano FP32 ONNX CPU |
+
+Key features:
+
+- direct, resumable Hugging Face model downloads with exact size and SHA-256
+  verification;
+- multi-turn chat with native KV-cache and conversation-history retention;
+- IME-aware UI that keeps the composer above the Samsung keyboard;
+- incremental Qwen PCM playback through Android `AudioTrack`;
+- one-thread versus four-thread TTS comparison for both voice backends;
+- live-memory-aware selection of QMX-repacked transformer blocks;
+- runtime-backed QMX selection, buffer, GEMM/prefill, and GEMV/decode evidence;
+- no packaged GPU, Vulkan, OpenCL, QNN, or NPU inference backend.
+
+## Execution architecture
+
+```text
+                                Kotlin Android UI
+                         chat, voice selection, metrics
+                                      |
+                   +------------------+------------------+
+                   |                                     |
+          Gemma / Qwen GGUF                     KittenTTS FP32 ONNX
+                   |                                     |
+             JNI + llama.cpp                         ONNX Runtime
+                   |                              CPUExecutionProvider
+        GGML CPU + Qualcomm KleidiAI                     |
+                   |                                     |
+       supported Q8 GEMM and GEMV              regular Arm CPU kernels
+                   |                                     |
+        QMX / base-SME1 instructions                     |
+                   +------------------+------------------+
+                                      |
+                        Snapdragon Oryon CPU cores
+```
+
+Only supported linear matrix operations enter the QMX kernels. Attention,
+normalization, sampling, the Qwen audio projector and decoder, and other
+unsupported operations continue on ordinary CPU paths.
+
+## Quick start: combined assistant
+
+```powershell
+git clone --branch codex/combined-assistant --recurse-submodules `
+  https://github.com/shivaylamba/qmx-gemma4-samsungs26ultra.git
+cd qmx-gemma4-samsungs26ultra
+powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1
+
+$env:JAVA_HOME = "C:\path\to\jdk-21"
+.\gradlew.bat :assistant-app:testDebugUnitTest :assistant-app:lintDebug :assistant-app:assembleDebug
+adb install -r .\assistant-app\build\outputs\apk\debug\assistant-app-debug.apk
+adb shell am start -n com.example.qmxassistant/.MainActivity
+```
+
+The APK contains the Android and native runtimes, not model weights. On first
+launch, tap **Download all models**. The combined app downloads and verifies
+7.32 GB of Gemma, Qwen, and Kitten model data, then lets you switch between the
+Qwen QMX and Kitten ONNX CPU voice paths.
 
 This build pins Qualcomm's [`kleidi-ai-qmx`](https://github.com/qualcomm/kleidiai/tree/kleidi-ai-qmx)
-source at commit `8316de1358b5c3589120af0f3d99477e7c16b2e7` and replaces
-llama.cpp's normal fetched KleidiAI release at CMake configure time. An
-app-owned patch binds the pinned upstream llama.cpp Q8 SME1 GEMM and GEMV
-dispatch to Qualcomm's explicit `qmx_mopa` and `qmx_dot` symbols. No llama.cpp
-fork or upstream pull request is required.
+source at commit `8316de1358b5c3589120af0f3d99477e7c16b2e7`. An app-owned
+patch replaces llama.cpp's standard Arm KleidiAI fetch and binds the Q8 SME1
+GEMM and GEMV dispatch to Qualcomm's explicit `qmx_mopa` and `qmx_dot` symbols.
+No llama.cpp fork or upstream pull request is required.
 
 The verified device is Samsung `SM-S948B` with Qualcomm `SM8850`. Its Android
 CPU feature list contains `sme` and the SME1 matrix data types but not `sme2`,
-so the tested QMX dispatch is SME1. The app has:
-
-- multi-turn chat with native KV-cache and conversation-history retention;
-- a Clear action that resets both UI and native conversation state;
-- IME-aware layout so the composer stays above the keyboard;
-- runtime-backed `QMX ACTIVE`/`CPU FALLBACK` status;
-- an in-app, persistent Hugging Face download with progress, cancellation, and
-  SHA-256 verification;
-- an ADB-triggerable 128-token QMX-versus-non-SME benchmark;
-- model-aware, live-memory-aware selection of QMX-repacked transformer blocks;
-- automatic reload of the most recently imported or downloaded GGUF.
-
-The interface uses the project's original light blue, white, and soft-gray
-visual language. Runtime details sit in a restrained on-device status card,
-while the conversation uses labeled full-width messages and an IME-safe
-composer that remains visible above the keyboard. Streamed output is batched
-into display frames and updates only the active message text, avoiding a full
-row rebind and forced scroll for every token. Displayed acceleration values
-come from the native runtime; the UI does not show estimated or hard-coded
-token speeds.
+so the tested QMX dispatch is SME1.
 
 For a source-level comparison with Kartikey's QMX-CPU sample, including why a
 270M model does not need the same layer planner as a 4B Android app, see
@@ -545,9 +615,9 @@ memory-pressure outcome. The generic-NEON baseline completed normally.
 ## Implementation notes
 
 - `lib/src/main/cpp/CMakeLists.txt` builds all Arm64 CPU variants and enables
-  `GGML_CPU_KLEIDIAI` for `arm64-v8a`. It sets CMake's
-  `FETCHCONTENT_SOURCE_DIR_KLEIDIAI_DOWNLOAD` override to the pinned
-  `third_party/kleidiai-qmx` submodule.
+  `GGML_CPU_KLEIDIAI` for `arm64-v8a`. Patched llama.cpp CMake downloads the
+  pinned Qualcomm KleidiAI source directly during configuration; there is no
+  separate `third_party/kleidiai-qmx` checkout.
 - `patches/llama.cpp-qualcomm-qmx.patch`, owned and versioned by this app
   repository, replaces the pinned upstream llama.cpp Q8 SME1 source entries with
   Qualcomm's `qmx_mopa` and `qmx_dot` files, binds the kernel table to those
@@ -562,6 +632,16 @@ memory-pressure outcome. The generic-NEON baseline completed normally.
   configuration alone.
 - The model context is 2048 tokens with a 128-token batch.
 - Jinja chat formatting is enabled and thinking output is disabled.
+
+## References
+
+- [Qualcomm developer blog: Llama model acceleration on CPU with QMX](https://www.qualcomm.com/developer/blog/2026/04/llama-models-acceleration-on-cpu-qmx)
+- [Qualcomm KleidiAI QMX branch](https://github.com/qualcomm/kleidiai/tree/kleidi-ai-qmx)
+- [llama.cpp](https://github.com/ggml-org/llama.cpp)
+- [Gemma 4 E2B Q8_0 GGUF](https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF)
+- [Qwen3-TTS 1.7B Q8_0 GGUF](https://huggingface.co/ggml-org/Qwen3-TTS-12Hz-1.7B-Base-GGUF)
+- [KittenTTS Nano 0.8 FP32 ONNX](https://huggingface.co/KittenML/kitten-tts-nano-0.8-fp32)
+- [ONNX Runtime for Android](https://onnxruntime.ai/docs/get-started/with-java.html)
 
 ## Troubleshooting
 
@@ -596,7 +676,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1
 
 ## Third-party software and model terms
 
-Upstream llama.cpp and Qualcomm KleidiAI QMX are pinned as Git submodules and
-retain their respective upstream licenses. The llama.cpp integration changes
-are stored as patches in this app repository. Gemma weights are downloaded
-separately and remain subject to their model-card terms.
+Upstream llama.cpp is pinned as a Git submodule, and Qualcomm KleidiAI QMX is
+pinned as a verified CMake download. Both retain their respective upstream
+licenses. The llama.cpp integration changes are stored as patches in this app
+repository. ONNX Runtime is consumed from Maven Central. Gemma, Qwen3-TTS, and
+KittenTTS weights are downloaded separately and remain subject to their
+model-card terms. Review the Kitten phonemizer and espeak-ng dictionary terms
+before redistributing a build.
